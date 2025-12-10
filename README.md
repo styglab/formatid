@@ -2,7 +2,7 @@
 ```
 slogan: Chaos in. Structured out.
 message: Format chaotic data with AI
-value: Structured, Normalized.
+value: Structured, Normalized, Parsable
 ```
 
 ## Overview
