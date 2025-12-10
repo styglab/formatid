@@ -1,10 +1,8 @@
 # Formatid
 ```
-Chaos in. Structured out.
-Format chaotic data with AI
-- Formatted
-- Structured
-- Normalized
+slogan: Chaos in. Structured out.
+message: Format chaotic data with AI
+value: Structured, Normalized.
 ```
 
 ## Overview
