@@ -1,8 +1,10 @@
-# formatid
+# Formatid
 ```
-AI data normalizer.
 Chaos in. Structured out.
-Format chaotic data.
+Format chaotic data with AI
+- Formatted
+- Structured
+- Normalized
 ```
 
 ## Overview
