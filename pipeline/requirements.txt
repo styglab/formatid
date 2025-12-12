@@ -1,0 +1,10 @@
+asyncpg
+SQLAlchemy>=2.0
+aiohttp
+aiofiles
+python-dotenv
+python-dateutil
+tenacity
+pandas
+numpy
+
