@@ -12,13 +12,51 @@ value: Structured, Normalized, Parsable
 ## Architecture Overview
 ## Project Structure
 ```
-data/
- ├── 00_raw/                # 원본 파일
- ├── 01_filtered/           # 규격서 관련 파일 (파일 필터링)
- ├── 02_extracted/          # 텍스트/표 구조 추출된 1차 가공본
- ├── 03_processed/          # 물품 규격 파싱/정규화 된 중간 산출물
- ├── 04_std/                # 카테고리/표준 품목명 통합/유사항목 병합된 최종 구조화본
- └── 05_embeddings/         # 임베딩 생성된 데이터
+formatid/
+├── api/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── routers/
+│   │   ├── core/
+│   │   ├── schemas/
+│   │   ├── models/
+│   │   ├── db/
+│   │   ├── services/
+│   │   └── utils/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── README.md
+│
+├── pipeline/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── jobs/
+│   │   ├── core/                   # DB 연결, 설정(config), 로깅(logging), 공통 클라이언트, 실행필수요소 등
+│   │   ├── db/
+│   │   ├── services/
+│   │   └── utils/                  # 비즈니스 무관 도구 모음: 문자열 처리, 날짜 파싱, 포맷 변환, 헬퍼함수 등
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── README.md
+│
+├── data/
+│   ├── 00_raw/
+│   ├── 01_filtered/
+│   ├── 02_extracted/
+│   ├── 03_processed/
+│   ├── 04_std/
+│   └── 05_embeddings/
+│
+├── infra/
+│   ├── docker-compose.yml
+│   ├── api-deployment.yaml
+│   ├── pipeline-deployment.yaml
+│   ├── redis-deployment.yaml
+│   └── README.md
+│
+├── sandbox/
+│
+└── README.md
 ```
 
 ## Development Process
@@ -31,6 +69,7 @@ data/
 ```
 ### 2. Data Collection & Preprocessing
 ```
+0. 공고 목록 DB 저장
 1. (raw) 나라장터 사이트에서 파일 다운로드 로직 개발 
 2. (filtered) 다운로드한 파일 중 규격 관련 파일 추출 
 3. (extracted) 텍스트 추출 text
