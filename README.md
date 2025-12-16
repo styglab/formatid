@@ -30,11 +30,12 @@ formatid/
 ├── pipeline/
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── jobs/
-│   │   ├── core/                   # DB 연결, 설정(config), 로깅(logging), 공통 클라이언트, 실행필수요소 등
-│   │   ├── db/
-│   │   ├── services/
-│   │   └── utils/                  # 비즈니스 무관 도구 모음: 문자열 처리, 날짜 파싱, 포맷 변환, 헬퍼함수 등
+│   │   ├── jobs/  # orchestration / retry / schedule
+│   │   ├── core/  # DB 연결, 설정(config), 로깅(logging), 공통 클라이언트, 실행필수요소 등
+│   │   ├── db/  # DB IO
+│   │   ├── services/  # 비즈니스 로직
+│   │   ├── clients/  # 외부 시스템 통신
+│   │   └── utils/  # 비즈니스 무관 도구 모음: 문자열 처리, 날짜 파싱, 포맷 변환, 헬퍼함수 등
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── README.md
@@ -62,10 +63,17 @@ formatid/
 ## Development Process
 ### 1. Planning & Requirements
 ```
-파급력이 큰 물품을 우선으로 진행
-- CCTV/영상보안 장비
-- 네트워크 장비(스위치/라우터/AP) 
-- 전선/케이블류 
+(ASIS) CCTV 공고 전용 로직으로 ‘선별 수집’
+🕐 Phase 1 (지금)
+CCTV_SET만 하루 2~3회 수집
+품질 높은 데이터로 제품 완성
+🕑 Phase 2
+CCTV_SET 유지
+특정 기간(예: 최근 7일)만 전체 수집 테스트
+🕒 Phase 3
+일자별 전체 수집 활성화
+모든 공고에 도메인 태깅
+(TOBE) 일자별 전체 수집 + 도메인 분류 
 ```
 ### 2. Data Collection & Preprocessing
 ```
