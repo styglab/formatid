@@ -1,0 +1,19 @@
+[
+    {
+        "group_id": "IT-CCTV",
+        "group_name": "CCTV / 영상감시",
+        "description": "영상 촬영, 저장, 관제 목적의 감시 시스템 및 장비",
+        "keywords": ["CCTV", "영상감시"]
+    },
+    {
+        "group_id": "ETC",
+        "group_name": "기타 / 미분류",
+        "description": "초기 물품군에 속하지 않는 신규 또는 특수 물품"
+    }
+]
+
+
+
+
+
+

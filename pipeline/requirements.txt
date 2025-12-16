@@ -7,4 +7,5 @@ python-dateutil
 tenacity
 pandas
 numpy
+pydantic-settings
 

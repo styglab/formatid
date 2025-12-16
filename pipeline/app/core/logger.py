@@ -1,11 +1,11 @@
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-import os
-from dotenv import load_dotenv
 #
-#
-load_dotenv(".env.pipeline")
+from app.core.deps import get_config
+
+
+settings = get_config()
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 LOG_DIR = BASE_DIR / "logs"
@@ -13,8 +13,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "app.log"
 
 # 로거 설정
-APP_NAME = os.getenv("APP_NAME")
-logger = logging.getLogger(APP_NAME) # pipeline
+logger = logging.getLogger(settings.APP_NAME) # pipeline
 logger.setLevel(logging.INFO)  # DEBUG / INFO / WARNING / ERROR / CRITICAL
 
 formatter = logging.Formatter(

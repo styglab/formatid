@@ -2,7 +2,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import text
 #
 from app.db.tables import bid_notice
-from app.core.db import engine
+from app.db.engine import get_engine
 #
 #
 async def bulk_upsert_bid_notices(rows: list[dict]) -> int:
@@ -22,7 +22,8 @@ async def bulk_upsert_bid_notices(rows: list[dict]) -> int:
             "updated_at": stmt.excluded.updated_at,
         },
     )
-
+    
+    engine = get_engine()
     async with engine.begin() as conn:
         result = await conn.execute(stmt)
         return result.rowcount
@@ -46,7 +47,8 @@ WHERE bn.bid_ntce_no = t.bid_ntce_no
 async def set_latest_flags(bid_ntce_nos: list[str]):
     if not bid_ntce_nos:
         return
-
+    
+    engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(
             SET_LATEST_SQL,
@@ -70,12 +72,13 @@ async def upsert_bid_notice(row: dict):
             "is_latest": True,
         },
     )
-
+    engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(stmt)
 
 
 async def bulk_insert_bid_notices(rows: list[dict]):
+    engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(insert(bid_notice), rows)
 

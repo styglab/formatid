@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Table, Column, Text, Integer, BigInteger, Boolean, TIMESTAMP, JSON, MetaData
+    Table, Column, String, Text, Integer, BigInteger, Boolean, TIMESTAMP, JSON, MetaData
 )
 #
 #
@@ -8,33 +8,34 @@ metadata = MetaData()
 bid_notice = Table(
     "bid_notice",
     metadata,
-    Column("bid_ntce_no", Text, primary_key=True), #bidNtceNo
-    Column("bid_ntce_ord", Text, primary_key=True), #bidNtceOrd
-    Column("bid_ntce_ord_num", Integer, nullable=False), #bidNtceOrd
-    Column("bid_ntce_nm", Text), #bidNtceNm
+    Column("bid_ntce_no", Text, primary_key=True), # bidNtceNo
+    Column("bid_ntce_ord", Text, primary_key=True), # bidNtceOrd
+    Column("bid_ntce_ord_num", Integer, nullable=False), # bidNtceOrd
     
-    Column("ntce_kind_nm", Text), #ntceKindNm
-    Column("bid_ntce_dt", TIMESTAMP(timezone=True)), #bidNtceDt
+    Column("bid_type", String(20), nullable=False), # 물품: thng, 공사: cnst
+    Column("bid_ntce_nm", Text, nullable=False), # bidNtceNm
+    Column("ntce_kind_nm", Text), # ntceKindNm
+    Column("bid_ntce_dt", TIMESTAMP(timezone=True)), # bidNtceDt
     
-    Column("ntce_instt_cd", Text), #ntceInsttCd    
-    Column("ntce_instt_nm", Text), #ntceInsttNm      
-    Column("dminstt_cd", Text), #dminsttCd    
-    Column("dminstt_nm", Text), #dminsttNm    
+    Column("ntce_instt_cd", Text), # ntceInsttCd    
+    Column("ntce_instt_nm", Text), # ntceInsttNm      
+    Column("dminstt_cd", Text), # dminsttCd    
+    Column("dminstt_nm", Text), # dminsttNm    
     
-    Column("dtil_prdct_clsfc_no", Text), #dtilPrdctClsfcNo            
-    Column("dtil_prdct_clsfc_no_nm", Text), #dtilPrdctClsfcNoNm  
-    Column("prdct_spec_nm", Text), #prdctSpecNm  
-    Column("prdct_qty", Text), #prdctQty  
-    Column("prdct_unit", Text), #prdctUnit  
-    Column("prdct_uprc", Text), #prdctUprc  
+    # 물품 전용
+    Column("dtil_prdct_clsfc_no", Text), # dtilPrdctClsfcNo            
+    Column("dtil_prdct_clsfc_no_nm", Text), # dtilPrdctClsfcNoNm
     
-    Column("bid_begin_dt", TIMESTAMP(timezone=True)), #bidBeginDt  
-    Column("bid_clse_dt", TIMESTAMP(timezone=True)), #bidClseDt  
-    Column("openg_dt", TIMESTAMP(timezone=True)), #opengDt 
-     
-    Column("asign_bdgt_amt", Text), #asignBdgtAmt  
-    Column("presmpt_prce", Text), #presmptPrce    
-      
+    # 일정
+    Column("bid_begin_dt", TIMESTAMP(timezone=True)), # bidBeginDt  
+    Column("bid_clse_dt", TIMESTAMP(timezone=True)), # bidClseDt  
+    Column("openg_dt", TIMESTAMP(timezone=True)), # opengDt 
+    
+    # 금액 
+    Column("bdgt_amt", BigInteger, nullable=True), # 예산: 물품: asignBdgtAmt / 공사: BdgtAmt
+    Column("presmpt_prce", BigInteger, nullable=True), # 추정가격: presmptPrce    
+    
+    # 메타
     Column("raw_json", JSON, nullable=False),
     Column("is_latest", Boolean, default=False),
     Column("created_at", TIMESTAMP(timezone=True)),
