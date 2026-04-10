@@ -1,111 +1,89 @@
-# Formatid
-```
-slogan: Chaos in. Structured out.
-message: Format chaotic data with AI
-value: Structured, Normalized, Parsable
-```
-
-## Overview
-## Demo / Screenshots
-## Features
-
-## Architecture Overview
 ## Project Structure
 ```
 formatid/
-├── api/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── routers/
-│   │   ├── core/
-│   │   ├── schemas/
-│   │   ├── models/
-│   │   ├── db/
-│   │   ├── services/
-│   │   └── utils/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── README.md
+├── agent/                           # core, tools, schemas
+├── services/
+│   ├── api/                         # FastAPI (external interface)
+│   │   ├── app/
+│   │   │   ├── main.py
+│   │   │   ├── routers/
+│   │   │   ├── schemas/
+│   │   │   └── deps/
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   │
+│   └── worker/                      # 실행 엔진 (task consumer)
+│       ├── app/
+│       │   ├── worker.py            # main loop
+│       │   ├── dispatcher.py        # task → handler mapping
+│       │   ├── registry.py          # task registry
+│       │   └── executor.py          # 실행 orchestration
+│       ├── Dockerfile
+│       └── requirements.txt
 │
-├── pipeline/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── jobs/  # orchestration / retry / schedule
-│   │   ├── core/  # DB 연결, 설정(config), 로깅(logging), 공통 클라이언트, 실행필수요소 등
-│   │   ├── db/  # DB IO
-│   │   ├── services/  # 비즈니스 로직
-│   │   ├── clients/  # 외부 시스템 통신
-│   │   └── utils/  # 비즈니스 무관 도구 모음: 문자열 처리, 날짜 파싱, 포맷 변환, 헬퍼함수 등
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── README.md
+├── domain/                          # 도메인 데이터 모델
+│   ├── bid.py
+│   ├── attachment.py
+│   ├── document.py
+│   └── task.py                      # queue payload schema
 │
-├── data/
-│   ├── 00_raw/
-│   ├── 01_filtered/
-│   ├── 02_extracted/
-│   ├── 03_processed/
-│   ├── 04_std/
-│   └── 05_embeddings/
+├── tasks/                           # 작업 정의 (pure function)
+│   ├── bid/
+│   │
+│   └── system/
+│       ├── health.py
+│       └── cleanup.py
+│
+├── shared/                          # "인프라/공통 로직"
+│   ├── task_registry/               # Redis abstraction
+│   │   └── client.py
+│   │
+│   ├── queue/                       # Redis abstraction
+│   │   ├── client.py
+│   │   ├── producer.py
+│   │   ├── consumer.py
+│   │   └── schema.py                # queue message 구조
+│   │
+│   ├── collectors/                  # 데이터 수집 (API / crawling)
+│   │   ├── base.py
+│   │   ├── g2b/
+│   │   │   ├── client.py
+│   │   │   ├── bid.py
+│   │   │   └── attachment.py
+│   │   └── registry.py
+│   │
+│   ├── storage/                     # 저장 abstraction
+│   │   ├── db.py
+│   │   ├── s3.py
+│   │   └── local.py
+│   │
+│   ├── attachments/                 # 파일 처리
+│   │   ├── downloader.py
+│   │   ├── parser.py                # pdf/docx 등
+│   │   └── extractor.py             # 텍스트 추출
+│   │
+│   └── utils/
+│       ├── logger.py
+│       ├── time.py
+│       └── id_generator.py
+│
+├── configs/                         # 설정 분리 (중요)
+│   ├── settings.py
+│   ├── logging.yaml
+│   └── constants.py
 │
 ├── infra/
 │   ├── docker-compose.yml
-│   ├── api-deployment.yaml
-│   ├── pipeline-deployment.yaml
-│   ├── redis-deployment.yaml
-│   └── README.md
+│   ├── redis/
+│   │   └── redis.conf
+│   └── env/
+│       ├── api.env
+│       └── worker.env
 │
-├── sandbox/
+├── scripts/                         # 운영용 스크립트
+│   ├── enqueue_job.py
+│   └── backfill.py
 │
-└── README.md
+└── data/                            # 로컬 캐시 or 임시 저장
 ```
 
-## Development Process
-### 1. Planning & Requirements
-```
-(ASIS) CCTV 공고 전용 로직으로 ‘선별 수집’
-🕐 Phase 1 (지금)
-CCTV_SET만 하루 2~3회 수집
-품질 높은 데이터로 제품 완성
-🕑 Phase 2
-CCTV_SET 유지
-특정 기간(예: 최근 7일)만 전체 수집 테스트
-🕒 Phase 3
-일자별 전체 수집 활성화
-모든 공고에 도메인 태깅
-(TOBE) 일자별 전체 수집 + 도메인 분류 
-```
-### 2. Data Collection & Preprocessing
-```
-0. 공고 목록 DB 저장
-1. (raw) 나라장터 사이트에서 파일 다운로드 로직 개발 
-2. (filtered) 다운로드한 파일 중 규격 관련 파일 추출 
-3. (extracted) 텍스트 추출 text
-4. (processed) 구성물품 및 규격 jsonl
-5. (std) 구성물품 및 규격 표준화
-```
-### 3. Model Development (LLM / Embedding / Inference)
-### 4. Backend Development (API / Services)
-### 5. Frontend Development (if applicable)
-### 6. Integration & Orchestration
-### 7. Testing (Unit / Integration / E2E)
-### 8. Deployment (Docker / CI/CD)
-### 9. Monitoring & Maintenance
-### 10. Future Improvements
-
-## Installation
-## Quick Start
-
-## API Reference
-## Configuration
-
-## Development Guide
-### Coding Style & Conventions
-### Linting & Formatting
-### How to Run Tests
-### Branch & Commit Rules
-
-## Roadmap
-## Contributing
-## License
-## Contact

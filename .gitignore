@@ -2,6 +2,9 @@
 data/
 logs/
 sandbox/
+tmp/
+old/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
