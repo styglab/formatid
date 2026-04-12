@@ -1,0 +1,49 @@
+{
+  "system.health.check": {
+    "task_name": "system.health.check",
+    "queue_name": "system:health",
+    "module_path": "tasks.system.health",
+    "max_retries": 1,
+    "retryable": false,
+    "timeout_seconds": 10,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 1,
+    "dlq_requeue_keep_attempts": false
+  },
+  "system.test.fail": {
+    "task_name": "system.test.fail",
+    "queue_name": "system:health",
+    "module_path": "tasks.system.fail",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 10,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.bid.collect": {
+    "task_name": "pps.bid.collect",
+    "queue_name": "pps:bid",
+    "module_path": "tasks.pps.bid.collect",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 30,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.attachment.download": {
+    "task_name": "pps.attachment.download",
+    "queue_name": "pps:attachment",
+    "module_path": "tasks.pps.attachment.download",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 30,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  }
+}

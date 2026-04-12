@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  system-health-worker:
+    build:
+      context: ..
+      dockerfile: infra/images/system_health/Dockerfile
+    user: "${UID}:${GID}"
+    env_file:
+      - ./env/worker.common.env
+      - ./env/worker.system-health.env
+    volumes:
+      - ../logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  pps-bid-worker:
+    build:
+      context: ..
+      dockerfile: infra/images/pps_bid/Dockerfile
+    user: "${UID}:${GID}"
+    env_file:
+      - ./env/worker.common.env
+      - ./env/worker.pps-bid.env
+    volumes:
+      - ../logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  pps-attachment-worker:
+    build:
+      context: ..
+      dockerfile: infra/images/pps_attachment/Dockerfile
+    user: "${UID}:${GID}"
+    env_file:
+      - ./env/worker.common.env
+      - ./env/worker.pps-attachment.env
+    volumes:
+      - ../logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 1
