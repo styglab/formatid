@@ -13,35 +13,36 @@ worker/
 │   ├── config.py               # 환경설정
 │   ├── logger.py               # 로깅 설정
 │   ├── queue.py                # Redis 큐 구현 연결
-│   ├── task_loader.py          # 루트 tasks 모듈 로딩
+│   ├── task_loader.py          # domain task 모듈 로딩
 │   ├── dispatcher.py           # task → handler mapping
 │   ├── executor.py             # 실행 orchestration
 │   └── worker.py               # main loop / CLI entrypoint
 └── README.md
 ```
 
-공용 task 메타데이터 원본은 [catalog.json](/home/user/projects/formatid/tasks/catalog.json) 입니다.
-[catalog.py](/home/user/projects/formatid/shared/tasking/catalog.py) 는 이 manifest를 읽는 로더입니다.
+공용 task 메타데이터 원본은 `domains/*/manifests/tasks.json` 입니다.
+[catalog.py](/home/user/projects/formatid/shared/tasking/catalog.py) 는 domain manifest를 읽는 로더입니다.
 현재 catalog에는 queue 이름과 task별 실행 정책이 들어 있습니다.
 payload validation도 여기서 선언합니다.
 
-worker service 메타데이터 원본은 [infra/worker_services](/home/user/projects/formatid/infra/worker_services) 아래 JSON manifest입니다.
+worker service 메타데이터 원본은 `domains/*/manifests/*worker.json` 입니다.
 health/ops에서 사용하는 기본 queue 목록과 expected worker 수는 [service_catalog.py](/home/user/projects/formatid/shared/service_catalog.py) 가 이 manifest를 읽어서 제공합니다.
 
-이미지/의존성은 [infra/images](/home/user/projects/formatid/infra/images) 아래 worker family별로 분리합니다.
+이미지/의존성은 domain bundle의 `images/` 아래 worker family별로 분리합니다.
 
-- [Dockerfile](/home/user/projects/formatid/infra/images/pps_bid/Dockerfile): `pps:bid`
-- [Dockerfile](/home/user/projects/formatid/infra/images/pps_attachment/Dockerfile): `pps:attachment`
+- [Dockerfile](/home/user/projects/formatid/domains/pps/images/pps_bid/Dockerfile): `pps:bid`
+- [Dockerfile](/home/user/projects/formatid/domains/pps/images/pps_attachment/Dockerfile): `pps:attachment`
 
-task 정의는 워커 내부가 아니라 저장소 루트의 `tasks/` 아래에 둡니다.
+task 정의는 워커 내부가 아니라 `domains/<domain>/tasks/` 아래에 둡니다.
 각 worker는 startup 시점에도 자기 queue에 속한 task 모듈만 import합니다.
 
 예:
 ```text
 project-root/
-├── tasks/
+├── domains/
 │   └── pps/
-│       └── ...
+│       ├── tasks/
+│       └── manifests/
 ├── services/
 │   ├── api/
 │   └── worker/
@@ -49,7 +50,7 @@ project-root/
 
 ## Run
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml up --build
 ```
 
 worker runtime 환경변수는 `infra/env/*.env` 에서 관리합니다.
@@ -57,13 +58,13 @@ worker runtime 환경변수는 `infra/env/*.env` 에서 관리합니다.
 로그는 기본적으로 stdout JSON과 함께 [logs](/home/user/projects/formatid/logs) 아래 날짜별 폴더에도 저장됩니다.
 
 - [worker.common.env](/home/user/projects/formatid/infra/env/worker.common.env): 공통 설정
-- [worker.pps-bid.env](/home/user/projects/formatid/infra/env/worker.pps-bid.env): `pps:bid`
-- [worker.pps-attachment.env](/home/user/projects/formatid/infra/env/worker.pps-attachment.env): `pps:attachment`
+- [worker.pps-bid.env](/home/user/projects/formatid/domains/pps/env/worker.pps-bid.env): `pps:bid`
+- [worker.pps-attachment.env](/home/user/projects/formatid/domains/pps/env/worker.pps-attachment.env): `pps:attachment`
 
 외부 producer에서 task 넣기:
 ```bash
 cd /path/to/project-root
-python3 scripts/ops.py enqueue pps:bid pps.bid.collect --payload '{"source":"cli"}'
+python3 scripts/ops.py enqueue pps:bid pps.bid.list.collect --payload '{"inqryBgnDt":"202301010000","inqryEndDt":"202301012359","pageNo":1}'
 ```
 
 worker heartbeat 조회:
@@ -87,11 +88,6 @@ curl http://localhost:8000/checkpoints
 task 상태 조회:
 ```bash
 python3 scripts/ops.py task <task_id>
-```
-
-Docker Compose 통합 스모크 테스트:
-```bash
-python3 scripts/ops.py smoke
 ```
 
 manifest 정합성 검증:
@@ -118,9 +114,11 @@ python3 scripts/ops.py requeue-dlq pps:bid --task-id <task_id>
 {
   "queue_name": "pps:bid",
   "task_id": "uuid",
-  "task_name": "pps.bid.collect",
+  "task_name": "pps.bid.list.collect",
   "payload": {
-    "source": "cli"
+    "inqryBgnDt": "202301010000",
+    "inqryEndDt": "202301012359",
+    "pageNo": 1
   },
   "attempts": 0,
   "enqueued_at": "2026-04-12T17:00:00+09:00"
@@ -131,15 +129,18 @@ python3 scripts/ops.py requeue-dlq pps:bid --task-id <task_id>
 
 task와 queue 조합은 고정 매핑입니다.
 
-- `pps.bid.collect -> pps:bid`
-- `pps.attachment.download -> pps:attachment`
+- `pps.bid.list.collect -> pps:bid`
+- `pps.bid.downstream.enqueue -> pps:bid`
+- `pps.bid.attachment.download -> pps:attachment`
+- `pps.bid_result.participants.collect -> pps:bid`
+- `pps.bid_result.winners.collect -> pps:bid`
 
 잘못된 조합은 enqueue 시점과 worker 실행 시점 모두에서 거부합니다.
-매핑과 실행 정책 원본은 [catalog.json](/home/user/projects/formatid/tasks/catalog.json) 입니다.
+매핑과 실행 정책 원본은 `domains/*/manifests/tasks.json` 입니다.
 payload도 enqueue 시점과 worker 실행 시점 모두에서 schema 검증합니다.
 또한 각 worker는 자신이 담당하는 queue에 속한 task만 실행합니다.
-예를 들어 `pps-bid-worker`는 `pps.bid.*` task만 처리합니다.
-그리고 import 단계에서도 `tasks.pps.bid.*`만 로드합니다.
+예를 들어 `pps-bid-worker`는 `pps:bid` 큐에 등록된 task만 처리합니다.
+현재는 공고 목록, downstream enqueue, 참여업체, 낙찰업체 수집 task가 여기에 포함됩니다.
 
 ## Task Status
 task lifecycle 상태는 Redis에 저장됩니다.
@@ -154,7 +155,7 @@ task lifecycle 상태는 Redis에 저장됩니다.
 ## Retry And DLQ
 기본 재시도 정책은 다음과 같습니다.
 
-- task별 `max_retries`, `retryable`, `backoff_seconds`, `timeout_seconds`, `dlq_enabled`는 [catalog.json](/home/user/projects/formatid/tasks/catalog.json) 에서 정의
+- task별 `max_retries`, `retryable`, `backoff_seconds`, `timeout_seconds`, `dlq_enabled`는 `domains/*/manifests/tasks.json` 에서 정의
 - `TASK_MAX_RETRIES=3`, `TASK_RETRY_DELAY_SECONDS=0`, `TASK_TIMEOUT_SECONDS=30` 은 fallback 기본값
 - retryable 오류는 task별 backoff 뒤 같은 큐로 재큐잉
 - 재시도 한도 초과 또는 non-retryable 오류는 DLQ로 이동
@@ -208,9 +209,9 @@ health 조회는 worker heartbeat를 직접 읽는 방식으로 처리합니다.
 
 ## Docker Compose
 `infra/docker-compose.yml`은 생성 파일입니다.
-worker 서비스 원본은 [infra/worker_services](/home/user/projects/formatid/infra/worker_services) 아래 manifest입니다.
+worker 서비스 원본은 `domains/*/manifests/*worker.json` 입니다.
 platform 서비스 원본은 [infra/platform_services](/home/user/projects/formatid/infra/platform_services) 아래 manifest입니다.
-scheduler 주기 작업 원본은 [infra/schedules](/home/user/projects/formatid/infra/schedules) 입니다.
+scheduler 주기 작업 원본은 `domains/*/manifests/schedules/*.json` 입니다.
 
 compose 재생성:
 ```bash
@@ -231,10 +232,10 @@ python3 scripts/generate_compose.py
 
 절차:
 
-1. `tasks/...` 아래에 task 구현 추가
-2. [catalog.json](/home/user/projects/formatid/tasks/catalog.json) 에 task manifest 추가
-3. [infra/worker_services](/home/user/projects/formatid/infra/worker_services) 에 worker service manifest 추가
-4. 필요 시 [infra/images](/home/user/projects/formatid/infra/images) 와 [infra/env](/home/user/projects/formatid/infra/env) 에 service 전용 정의 추가
+1. `domains/<domain>/tasks/...` 아래에 task 구현 추가
+2. `domains/<domain>/manifests/tasks.json` 에 task manifest 추가
+3. `domains/<domain>/manifests/<service>_worker.json` 에 worker service manifest 추가
+4. 필요 시 `domains/<domain>/images` 와 `domains/<domain>/env` 에 service 전용 정의 추가
 5. compose 재생성
 
 ```bash
@@ -247,7 +248,7 @@ python3 scripts/generate_compose.py
 
 실행:
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml up --build
 ```
 
 ## Next

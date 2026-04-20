@@ -6,10 +6,10 @@
     "infra/env/postgres.env"
   ],
   "ports": [
-    "5432:5432"
+    "${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
   ],
   "volumes": [
-    "postgres-data:/var/lib/postgresql/data",
+    "${POSTGRES_DATA_DIR:-./postgres/data}:/var/lib/postgresql/data",
     "./postgres/init:/docker-entrypoint-initdb.d:ro"
   ],
   "healthcheck": {

@@ -1,7 +1,9 @@
 from typing import Any
 
 from shared.queue.redis import RedisTaskQueue
+from shared.postgres_url import get_checkpoint_database_url
 from shared.tasking.catalog import get_task_definition
+from shared.tasking.execution_store import PostgresTaskExecutionStore
 from shared.tasking.schemas import TaskMessage
 from shared.tasking.status_store import TaskStatusStore
 from shared.tasking.routing import validate_task_route
@@ -21,6 +23,7 @@ async def enqueue_task(
     validated_payload = validate_task_payload(task_name=task_name, payload=payload)
     queue = RedisTaskQueue(redis_url=redis_url, queue_name=queue_name)
     status_store = TaskStatusStore(redis_url=redis_url, ttl_seconds=status_ttl)
+    execution_store = PostgresTaskExecutionStore(database_url=get_checkpoint_database_url(host_default="postgres"))
     definition = get_task_definition(task_name)
     message = TaskMessage(
         queue_name=queue_name,
@@ -31,7 +34,7 @@ async def enqueue_task(
 
     try:
         await queue.put(message)
-        await status_store.mark_queued(
+        status_document = await status_store.mark_queued(
             message,
             policy_snapshot={
                 "queue_name": definition.queue_name,
@@ -45,7 +48,12 @@ async def enqueue_task(
                 "dlq_requeue_keep_attempts": definition.dlq_requeue_keep_attempts,
             },
         )
+        try:
+            await execution_store.upsert(status_document)
+        except Exception:
+            pass
     finally:
+        await execution_store.close()
         await status_store.close()
         await queue.close()
 

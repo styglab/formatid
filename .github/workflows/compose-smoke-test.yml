@@ -1,4 +1,4 @@
-name: Compose Smoke Test
+name: Compose Smoke Test 
 
 on:
   push:

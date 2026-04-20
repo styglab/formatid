@@ -1,13 +1,12 @@
-import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from shared.domain_catalog import iter_task_manifest_paths, load_json_file
 from shared.tasking.errors import UnknownTaskRoutingError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TASK_CATALOG_PATH = PROJECT_ROOT / "tasks" / "catalog.json"
 
 
 @dataclass(frozen=True)
@@ -27,29 +26,32 @@ class TaskDefinition:
 
 @lru_cache(maxsize=1)
 def _load_task_catalog() -> dict[str, TaskDefinition]:
-    raw_catalog = json.loads(TASK_CATALOG_PATH.read_text(encoding="utf-8"))
-    if not isinstance(raw_catalog, dict):
-        raise RuntimeError(f"invalid task catalog format: {TASK_CATALOG_PATH}")
-
     task_catalog: dict[str, TaskDefinition] = {}
-    for task_name, payload in raw_catalog.items():
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"invalid task definition for {task_name}: expected object")
+    for path in iter_task_manifest_paths():
+        raw_catalog = load_json_file(path)
+        if not isinstance(raw_catalog, dict):
+            raise RuntimeError(f"invalid task catalog format: {path}")
 
-        definition = TaskDefinition(
-            task_name=payload.get("task_name", task_name),
-            queue_name=payload["queue_name"],
-            module_path=payload["module_path"],
-            payload_schema=payload.get("payload_schema"),
-            max_retries=payload.get("max_retries"),
-            retryable=payload.get("retryable", True),
-            backoff_seconds=payload.get("backoff_seconds"),
-            timeout_seconds=payload.get("timeout_seconds"),
-            dlq_enabled=payload.get("dlq_enabled", True),
-            dlq_requeue_limit=payload.get("dlq_requeue_limit"),
-            dlq_requeue_keep_attempts=payload.get("dlq_requeue_keep_attempts", False),
-        )
-        task_catalog[definition.task_name] = definition
+        for task_name, payload in raw_catalog.items():
+            if not isinstance(payload, dict):
+                raise RuntimeError(f"invalid task definition for {task_name}: expected object")
+
+            definition = TaskDefinition(
+                task_name=payload.get("task_name", task_name),
+                queue_name=payload["queue_name"],
+                module_path=payload["module_path"],
+                payload_schema=payload.get("payload_schema"),
+                max_retries=payload.get("max_retries"),
+                retryable=payload.get("retryable", True),
+                backoff_seconds=payload.get("backoff_seconds"),
+                timeout_seconds=payload.get("timeout_seconds"),
+                dlq_enabled=payload.get("dlq_enabled", True),
+                dlq_requeue_limit=payload.get("dlq_requeue_limit"),
+                dlq_requeue_keep_attempts=payload.get("dlq_requeue_keep_attempts", False),
+            )
+            if definition.task_name in task_catalog:
+                raise RuntimeError(f"duplicate task_name in domain manifests: {definition.task_name}")
+            task_catalog[definition.task_name] = definition
 
     return task_catalog
 

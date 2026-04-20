@@ -4,11 +4,13 @@ from services.api.app.schemas.health import (
     HealthResponse,
     LivenessResponse,
     ReadinessResponse,
+    SchedulerHealthResponse,
     WorkersHealthResponse,
 )
 from services.api.app.services.health_service import (
     build_health_summary,
     build_readiness,
+    get_scheduler_health_report,
     get_workers_health_report,
 )
 
@@ -41,3 +43,9 @@ async def get_health() -> HealthResponse:
 async def get_workers_health() -> WorkersHealthResponse:
     report = await get_workers_health_report()
     return WorkersHealthResponse.model_validate(report)
+
+
+@router.get("/health/scheduler", response_model=SchedulerHealthResponse)
+async def get_scheduler_health() -> SchedulerHealthResponse:
+    report = await get_scheduler_health_report()
+    return SchedulerHealthResponse.model_validate(report)
