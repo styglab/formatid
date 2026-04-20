@@ -1,14 +1,8 @@
 from datetime import datetime
 from typing import Any
 
+from shared.service_catalog import get_expected_workers
 from shared.time import now
-
-
-DEFAULT_EXPECTED_WORKERS = {
-    "system:health": 1,
-    "pps:bid": 1,
-    "pps:attachment": 1,
-}
 
 
 def build_health_report(
@@ -20,7 +14,7 @@ def build_health_report(
     heartbeat_ttl_seconds: int,
     expected_workers: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    expected_workers = expected_workers or DEFAULT_EXPECTED_WORKERS
+    expected_workers = expected_workers or get_expected_workers()
     current_time = now()
     healthy_threshold_seconds = heartbeat_interval_seconds * 2
 

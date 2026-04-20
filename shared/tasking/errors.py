@@ -16,3 +16,7 @@ class UnknownTaskError(TaskingError):
 
 class WorkerTaskNotAllowedError(TaskingError):
     """Raised when a worker receives a task outside its allowed task set."""
+
+
+class InvalidTaskPayloadError(TaskingError):
+    """Raised when a task payload does not match its declared schema."""

@@ -9,5 +9,6 @@ COPY services ./services
 COPY tasks ./tasks
 COPY shared ./shared
 COPY scripts ./scripts
+COPY infra/postgres ./infra/postgres
 
-CMD ["python", "-m", "services.worker.app.worker"]
+CMD ["python", "-m", "services.worker.runtime.worker"]

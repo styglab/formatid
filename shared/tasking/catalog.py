@@ -7,7 +7,7 @@ from shared.tasking.errors import UnknownTaskRoutingError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TASK_CATALOG_PATH = PROJECT_ROOT / "infra" / "tasks" / "catalog.json"
+TASK_CATALOG_PATH = PROJECT_ROOT / "tasks" / "catalog.json"
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,7 @@ class TaskDefinition:
     task_name: str
     queue_name: str
     module_path: str
+    payload_schema: str | None = None
     max_retries: int | None = None
     retryable: bool = True
     backoff_seconds: int | None = None
@@ -39,6 +40,7 @@ def _load_task_catalog() -> dict[str, TaskDefinition]:
             task_name=payload.get("task_name", task_name),
             queue_name=payload["queue_name"],
             module_path=payload["module_path"],
+            payload_schema=payload.get("payload_schema"),
             max_retries=payload.get("max_retries"),
             retryable=payload.get("retryable", True),
             backoff_seconds=payload.get("backoff_seconds"),
