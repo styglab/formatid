@@ -1,0 +1,11 @@
+{
+  "service_name": "pps-attachment-worker",
+  "queue_name": "pps:attachment",
+  "dockerfile": "domains/pps/images/pps_attachment/Dockerfile",
+  "env_files": [
+    "infra/env/postgres.env",
+    "infra/env/worker.common.env",
+    "domains/pps/env/worker.pps-attachment.env"
+  ],
+  "replicas": 1
+}

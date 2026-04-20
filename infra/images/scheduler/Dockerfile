@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY services /app/services
 COPY shared /app/shared
-COPY tasks /app/tasks
+COPY domains /app/domains
 COPY infra /app/infra
 
 CMD ["python", "-m", "services.scheduler.runtime.scheduler"]

@@ -11,7 +11,7 @@ from socket import gethostname
 def find_project_root() -> Path:
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "tasks").exists() and (parent / "shared").exists():
+        if (parent / "domains").exists() and (parent / "shared").exists():
             return parent
     raise RuntimeError("project root not found")
 
@@ -24,15 +24,18 @@ from services.worker.runtime.config import get_settings
 from services.worker.runtime.executor import execute_task
 from services.worker.runtime.logger import configure_logging, get_logger, log_event
 from services.worker.runtime.queue import RedisTaskQueue, TaskQueue
+from services.worker.runtime.retry_policy import (
+    TaskPolicy,
+    build_task_policy,
+    decide_failure_action,
+)
 from services.worker.runtime.task_loader import load_task_modules
-from shared.tasking.catalog import get_task_definition, list_task_names_for_queue
+from shared.tasking.catalog import list_task_names_for_queue
 from shared.tasking.errors import (
-    InvalidTaskRouteError,
-    InvalidTaskPayloadError,
-    UnknownTaskError,
-    UnknownTaskRoutingError,
     WorkerTaskNotAllowedError,
 )
+from shared.postgres_url import get_checkpoint_database_url
+from shared.tasking.execution_store import PostgresTaskExecutionStore
 from shared.tasking.registry import registry
 from shared.tasking.routing import validate_task_route
 from shared.tasking.status_store import TaskStatusStore
@@ -66,6 +69,10 @@ def build_status_store() -> TaskStatusStore:
     )
 
 
+def build_execution_store() -> PostgresTaskExecutionStore:
+    return PostgresTaskExecutionStore(database_url=get_checkpoint_database_url(host_default="postgres"))
+
+
 def build_worker_id(*, queue_name: str) -> str:
     return f"{queue_name}:{gethostname()}:{os.getpid()}"
 
@@ -80,38 +87,14 @@ def build_dlq_queue_name(*, queue_name: str) -> str:
     return f"{queue_name}:{settings.task_dlq_suffix}"
 
 
-def is_retryable_error(exc: Exception) -> bool:
-    return not isinstance(
-        exc,
-        (
-            InvalidTaskPayloadError,
-            InvalidTaskRouteError,
-            UnknownTaskRoutingError,
-            UnknownTaskError,
-            WorkerTaskNotAllowedError,
-        ),
-    )
-
-
-def get_task_policy(task_name: str) -> dict[str, int | bool]:
+def get_task_policy(task_name: str) -> TaskPolicy:
     settings = get_settings()
-    definition = get_task_definition(task_name)
-    return {
-        "max_retries": settings.task_max_retries if definition.max_retries is None else definition.max_retries,
-        "payload_schema": definition.payload_schema,
-        "retryable": definition.retryable,
-        "backoff_seconds": (
-            settings.task_retry_delay_seconds
-            if definition.backoff_seconds is None
-            else definition.backoff_seconds
-        ),
-        "timeout_seconds": (
-            settings.task_timeout_seconds
-            if definition.timeout_seconds is None
-            else definition.timeout_seconds
-        ),
-        "dlq_enabled": definition.dlq_enabled,
-    }
+    return build_task_policy(
+        task_name=task_name,
+        default_max_retries=settings.task_max_retries,
+        default_backoff_seconds=settings.task_retry_delay_seconds,
+        default_timeout_seconds=settings.task_timeout_seconds,
+    )
 
 
 async def requeue_message(*, message, queue_name: str) -> None:
@@ -120,6 +103,28 @@ async def requeue_message(*, message, queue_name: str) -> None:
         await queue.put(message)
     finally:
         await queue.close()
+
+
+async def record_execution_history(
+    *,
+    execution_store: PostgresTaskExecutionStore,
+    status_document: dict,
+    worker_id: str,
+) -> None:
+    try:
+        await execution_store.upsert(status_document)
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "task_execution_history_record_failed",
+            worker_id=worker_id,
+            task_id=status_document.get("task_id"),
+            task_name=status_document.get("task_name"),
+            status=status_document.get("status"),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
 
 
 async def run_heartbeat_loop(*, store: WorkerHeartbeatStore, shutdown_event: asyncio.Event) -> None:
@@ -217,6 +222,7 @@ async def _process_message(
     worker_id: str,
     allowed_task_names: set[str],
     status_store: TaskStatusStore,
+    execution_store: PostgresTaskExecutionStore,
     raise_on_error: bool,
 ) -> None:
     try:
@@ -240,16 +246,25 @@ async def _process_message(
             )
         message.payload = validate_task_payload(task_name=message.task_name, payload=message.payload)
         task_policy = get_task_policy(message.task_name)
-        await status_store.mark_running(
+        status_document = await status_store.mark_running(
             message,
             worker_id=worker_id,
-            policy_snapshot=task_policy,
+            policy_snapshot=task_policy.to_snapshot(),
         )
-        timeout_seconds = int(task_policy["timeout_seconds"])
-        result = await asyncio.wait_for(execute_task(message), timeout=timeout_seconds)
-        await status_store.mark_succeeded(
+        await record_execution_history(
+            execution_store=execution_store,
+            status_document=status_document,
+            worker_id=worker_id,
+        )
+        result = await asyncio.wait_for(execute_task(message), timeout=task_policy.timeout_seconds)
+        status_document = await status_store.mark_succeeded(
             message,
             result,
+            worker_id=worker_id,
+        )
+        await record_execution_history(
+            execution_store=execution_store,
+            status_document=status_document,
             worker_id=worker_id,
         )
     except asyncio.CancelledError as exc:
@@ -267,33 +282,35 @@ async def _process_message(
             error_type=error_payload["type"],
             error_message="task interrupted during worker shutdown",
         )
-        await status_store.mark_interrupted(
+        status_document = await status_store.mark_interrupted(
             message,
             worker_id=worker_id,
-            policy_snapshot=task_policy,
+            policy_snapshot=task_policy.to_snapshot(),
             error=error_payload,
+        )
+        await record_execution_history(
+            execution_store=execution_store,
+            status_document=status_document,
+            worker_id=worker_id,
         )
         return
     except Exception as exc:
         task_policy = get_task_policy(message.task_name)
         error_payload = _build_error_payload(exc)
-        next_attempts = message.attempts + 1
-        retryable = bool(task_policy["retryable"]) and is_retryable_error(exc)
-        max_retries = int(task_policy["max_retries"])
-        backoff_seconds = int(task_policy["backoff_seconds"])
-        dlq_enabled = bool(task_policy["dlq_enabled"])
+        decision = decide_failure_action(attempts=message.attempts, policy=task_policy, exc=exc)
+        policy_snapshot = task_policy.to_snapshot()
 
-        if retryable and next_attempts <= max_retries:
+        if decision.action == "retry":
             retry_message = message.__class__(
                 queue_name=message.queue_name,
                 task_name=message.task_name,
                 payload=message.payload,
-                attempts=next_attempts,
+                attempts=decision.next_attempts,
                 task_id=message.task_id,
                 enqueued_at=message.enqueued_at,
             )
-            if backoff_seconds > 0:
-                await asyncio.sleep(backoff_seconds)
+            if task_policy.backoff_seconds > 0:
+                await asyncio.sleep(task_policy.backoff_seconds)
             await requeue_message(message=retry_message, queue_name=message.queue_name)
             log_event(
                 logger,
@@ -303,27 +320,31 @@ async def _process_message(
                 task_id=message.task_id,
                 queue_name=message.queue_name,
                 task_name=message.task_name,
-                attempts=next_attempts,
-                max_retries=max_retries,
-                backoff_seconds=backoff_seconds,
+                attempts=decision.next_attempts,
+                max_retries=task_policy.max_retries,
+                backoff_seconds=task_policy.backoff_seconds,
                 error_type=error_payload["type"],
                 error_message=error_payload["message"],
             )
-            await status_store.mark_retrying(
+            status_document = await status_store.mark_retrying(
                 message,
                 worker_id=worker_id,
-                next_attempts=next_attempts,
-                max_retries=max_retries,
-                policy_snapshot=task_policy,
+                next_attempts=decision.next_attempts,
+                max_retries=task_policy.max_retries,
+                policy_snapshot=policy_snapshot,
                 error=error_payload,
             )
-        elif dlq_enabled:
-            terminal_attempts = next_attempts if retryable else message.attempts
+            await record_execution_history(
+                execution_store=execution_store,
+                status_document=status_document,
+                worker_id=worker_id,
+            )
+        elif decision.action == "dead_letter":
             dlq_message = message.__class__(
                 queue_name=message.queue_name,
                 task_name=message.task_name,
                 payload=message.payload,
-                attempts=terminal_attempts,
+                attempts=decision.terminal_attempts,
                 task_id=message.task_id,
                 enqueued_at=message.enqueued_at,
             )
@@ -338,18 +359,23 @@ async def _process_message(
                 queue_name=message.queue_name,
                 dlq_queue_name=dlq_queue_name,
                 task_name=message.task_name,
-                attempts=terminal_attempts,
-                max_retries=max_retries,
+                attempts=decision.terminal_attempts,
+                max_retries=task_policy.max_retries,
                 error_type=error_payload["type"],
                 error_message=error_payload["message"],
             )
-            await status_store.mark_dead_lettered(
+            status_document = await status_store.mark_dead_lettered(
                 dlq_message,
                 worker_id=worker_id,
                 dlq_queue_name=dlq_queue_name,
-                max_retries=max_retries,
-                policy_snapshot=task_policy,
+                max_retries=task_policy.max_retries,
+                policy_snapshot=policy_snapshot,
                 error=error_payload,
+            )
+            await record_execution_history(
+                execution_store=execution_store,
+                status_document=status_document,
+                worker_id=worker_id,
             )
         else:
             log_event(
@@ -363,13 +389,18 @@ async def _process_message(
                 attempts=message.attempts,
                 error_type=error_payload["type"],
                 error_message=error_payload["message"],
-                dlq_enabled=False,
+                dlq_enabled=task_policy.dlq_enabled,
             )
-            await status_store.mark_failed(
+            status_document = await status_store.mark_failed(
                 message,
                 error_payload,
                 worker_id=worker_id,
-                policy_snapshot=task_policy,
+                policy_snapshot=policy_snapshot,
+            )
+            await record_execution_history(
+                execution_store=execution_store,
+                status_document=status_document,
+                worker_id=worker_id,
             )
         log_event(
             logger,
@@ -393,6 +424,7 @@ async def run_worker(*, once: bool) -> None:
     queue = build_queue()
     heartbeat_store = build_heartbeat_store()
     status_store = build_status_store()
+    execution_store = build_execution_store()
     shutdown_event = asyncio.Event()
     allowed_task_names = set(list_task_names_for_queue(settings.worker_queue_name))
 
@@ -473,6 +505,7 @@ async def run_worker(*, once: bool) -> None:
                     worker_id=worker_id,
                     allowed_task_names=allowed_task_names,
                     status_store=status_store,
+                    execution_store=execution_store,
                     raise_on_error=once,
                 )
             )
@@ -539,6 +572,7 @@ async def run_worker(*, once: bool) -> None:
             queue_name=settings.worker_queue_name,
         )
         await status_store.close()
+        await execution_store.close()
         await heartbeat_store.close()
         await queue.close()
 

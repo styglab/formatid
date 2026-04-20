@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from shared.domain_catalog import list_domain_scheduler_env_files
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PLATFORM_SERVICE_MANIFESTS_DIR = PROJECT_ROOT / "infra" / "platform_services"
@@ -48,6 +50,10 @@ def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
                 retries=int(healthcheck_payload["retries"]),
             )
 
+        env_files = list(payload.get("env_files", []))
+        if payload["service_name"] == "scheduler":
+            env_files.extend(list_domain_scheduler_env_files())
+
         definition = PlatformServiceDefinition(
             service_name=payload["service_name"],
             image=payload.get("image"),
@@ -55,7 +61,7 @@ def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
             build_context=payload.get("build_context", ".."),
             user=payload.get("user"),
             restart=payload.get("restart"),
-            env_files=tuple(payload.get("env_files", [])),
+            env_files=tuple(env_files),
             ports=tuple(payload.get("ports", [])),
             volumes=tuple(payload.get("volumes", [])),
             depends_on_service_healthy=tuple(payload.get("depends_on_service_healthy", [])),

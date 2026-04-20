@@ -1,9 +1,10 @@
-# Custom
+# Custom 
 data/
 logs/
 sandbox/
 tmp/
 old/
+infra/postgres/data/
 
 
 # Byte-compiled / optimized / DLL files
@@ -147,6 +148,10 @@ celerybeat.pid
 .envrc
 .venv
 env/
+!infra/env/
+infra/env/*
+!infra/env/compose.env
+domains/*/env/*.env
 venv/
 ENV/
 env.bak/

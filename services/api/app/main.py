@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from services.api.app.config import get_settings
 from services.api.app.routers.checkpoints import router as checkpoints_router
 from services.api.app.routers.health import router as health_router
+from services.api.app.routers.observability import router as observability_router
 
 
 settings = get_settings()
@@ -12,6 +13,7 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(checkpoints_router)
+app.include_router(observability_router)
 
 
 @app.get("/")
