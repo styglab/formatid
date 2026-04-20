@@ -1,0 +1,67 @@
+{
+  "pps.bid.list.collect": {
+    "task_name": "pps.bid.list.collect",
+    "queue_name": "pps:bid",
+    "module_path": "tasks.pps.bid.list",
+    "payload_schema": "tasks.pps.bid.schemas.CollectBidListPayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.bid.attachment.download": {
+    "task_name": "pps.bid.attachment.download",
+    "queue_name": "pps:attachment",
+    "module_path": "tasks.pps.bid.attachment",
+    "payload_schema": "tasks.pps.bid.schemas.DownloadBidAttachmentPayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.bid.downstream.enqueue": {
+    "task_name": "pps.bid.downstream.enqueue",
+    "queue_name": "pps:bid",
+    "module_path": "tasks.pps.bid.downstream",
+    "payload_schema": "tasks.pps.bid.schemas.EnqueueBidDownstreamPayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.bid_result.participants.collect": {
+    "task_name": "pps.bid_result.participants.collect",
+    "queue_name": "pps:bid",
+    "module_path": "tasks.pps.bid_result.participants",
+    "payload_schema": "tasks.pps.bid_result.schemas.CollectBidResultPayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  },
+  "pps.bid_result.winners.collect": {
+    "task_name": "pps.bid_result.winners.collect",
+    "queue_name": "pps:bid",
+    "module_path": "tasks.pps.bid_result.winners",
+    "payload_schema": "tasks.pps.bid_result.schemas.CollectBidResultPayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 0,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3,
+    "dlq_requeue_keep_attempts": false
+  }
+}

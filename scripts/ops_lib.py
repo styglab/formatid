@@ -16,8 +16,13 @@ from shared.tasking.catalog import (
     list_queue_names,
 )
 from shared.tasking.schemas import TaskMessage
+from shared.service_catalog import get_expected_workers, list_worker_queue_names
+from shared.schedule_catalog import list_schedule_definitions
+from shared.platform_service_catalog import list_platform_service_definitions
 from shared.time import iso_now
-from shared.worker_health.health import DEFAULT_EXPECTED_WORKERS, build_health_report
+from shared.worker_health.health import build_health_report
+from shared.service_catalog import list_service_definitions
+from shared.tasking.catalog import list_task_definitions
 
 COMPOSE_FILE = PROJECT_ROOT / "infra" / "docker-compose.yml"
 POLL_TIMEOUT_SECONDS = 30
@@ -52,42 +57,16 @@ def print_json(payload: object) -> None:
 
 
 async def enqueue(queue_name: str, task_name: str, payload: dict, attempts: int) -> TaskMessage:
-    from shared.queue.redis import RedisTaskQueue
-    from shared.tasking.routing import validate_task_route
-    from shared.tasking.status_store import TaskStatusStore
+    from shared.tasking.enqueue import enqueue_task
 
-    redis_url = get_redis_url()
-    validate_task_route(queue_name=queue_name, task_name=task_name)
-    queue = RedisTaskQueue(redis_url=redis_url, queue_name=queue_name)
-    status_store = TaskStatusStore(redis_url=redis_url)
-    message = TaskMessage(
+    return await enqueue_task(
+        redis_url=get_redis_url(),
         queue_name=queue_name,
         task_name=task_name,
         payload=payload,
         attempts=attempts,
+        status_ttl=int(os.getenv("TASK_STATUS_TTL", "604800")),
     )
-
-    try:
-        await queue.put(message)
-        definition = get_task_definition(task_name)
-        await status_store.mark_queued(
-            message,
-            policy_snapshot={
-                "queue_name": definition.queue_name,
-                "max_retries": definition.max_retries,
-                "retryable": definition.retryable,
-                "backoff_seconds": definition.backoff_seconds,
-                "timeout_seconds": definition.timeout_seconds,
-                "dlq_enabled": definition.dlq_enabled,
-                "dlq_requeue_limit": definition.dlq_requeue_limit,
-                "dlq_requeue_keep_attempts": definition.dlq_requeue_keep_attempts,
-            },
-        )
-    finally:
-        await status_store.close()
-        await queue.close()
-
-    return message
 
 
 async def check_workers(queue_names: list[str]) -> dict:
@@ -116,6 +95,7 @@ async def check_workers(queue_names: list[str]) -> dict:
         queue_sizes=queue_sizes,
         heartbeat_interval_seconds=heartbeat_interval,
         heartbeat_ttl_seconds=heartbeat_ttl,
+        expected_workers=get_expected_workers(),
     )
     report["redis_url"] = redis_url
     return report
@@ -127,6 +107,27 @@ async def fetch_task(task_id: str) -> dict | None:
     store = TaskStatusStore(redis_url=get_redis_url())
     try:
         return await store.get(task_id)
+    finally:
+        await store.close()
+
+
+async def fetch_checkpoints(name: str | None = None) -> dict:
+    from shared.checkpoints.postgres import PostgresCheckpointStore
+
+    database_url = os.getenv("CHECKPOINT_DATABASE_URL", "postgresql://formatid:formatid@localhost:5432/formatid")
+    store = PostgresCheckpointStore(database_url=database_url)
+    try:
+        if name is None:
+            checkpoints = await store.list()
+            return {
+                "database_url": database_url,
+                "checkpoints": checkpoints,
+            }
+        checkpoint = await store.get(name)
+        return {
+            "database_url": database_url,
+            "checkpoint": checkpoint,
+        }
     finally:
         await store.close()
 
@@ -335,7 +336,7 @@ def compose_run_python(*python_args: str) -> str:
         "run",
         "--rm",
         "--no-deps",
-        "system-health-worker",
+        "pps-bid-worker",
         "python",
         *python_args,
     )
@@ -385,7 +386,7 @@ def wait_for_worker_heartbeats() -> dict:
         payload = json.loads(output)
         last_payload = payload
         workers = payload.get("workers", {})
-        if all(workers.get(queue_name) for queue_name in ("system:health", "pps:bid", "pps:attachment")):
+        if all(workers.get(queue_name) for queue_name in ("pps:bid", "pps:attachment")):
             return payload
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -445,7 +446,6 @@ def run_compose_smoke_test() -> dict:
     try:
         compose(
             "build",
-            "system-health-worker",
             "pps-bid-worker",
             "pps-attachment-worker",
         )
@@ -453,69 +453,30 @@ def run_compose_smoke_test() -> dict:
             "up",
             "-d",
             "redis",
-            "system-health-worker",
             "pps-bid-worker",
             "pps-attachment-worker",
         )
 
         heartbeat_report = wait_for_worker_heartbeats()
 
-        health_task = enqueue_for_smoke(
-            "system:health",
-            "system.health.check",
+        bid_task = enqueue_for_smoke(
+            "pps:bid",
+            "pps.bid.collect",
             {"source": "compose-smoke-test"},
         )
-        fail_task = enqueue_for_smoke(
-            "system:health",
-            "system.test.fail",
+        attachment_task = enqueue_for_smoke(
+            "pps:attachment",
+            "pps.attachment.download",
             {"source": "compose-smoke-test"},
         )
 
-        health_status = wait_for_task_status(health_task["task_id"], "succeeded")
-        fail_status = wait_for_task_status(fail_task["task_id"], "dead_lettered")
-        dlq_payload = wait_for_dlq_message("system:health", fail_task["task_id"])
-
-        dlq_requeues: list[dict] = []
-        for expected_requeue_count in (1, 2, 3):
-            dlq_before_requeue = wait_for_dlq_message("system:health", fail_task["task_id"])
-            requeue_result = requeue_dlq_for_smoke("system:health", fail_task["task_id"])
-            recycled_status = wait_for_task_status(fail_task["task_id"], "dead_lettered")
-            requeue_count_status = wait_for_task_requeue_count(
-                fail_task["task_id"],
-                expected_requeue_count,
-            )
-            dlq_after_requeue = wait_for_dlq_message("system:health", fail_task["task_id"])
-            dlq_requeues.append(
-                {
-                    "dlq_before_requeue": dlq_before_requeue,
-                    "requeue_result": requeue_result,
-                    "status_after_requeue": recycled_status,
-                    "status_with_requeue_count": requeue_count_status,
-                    "dlq_after_requeue": dlq_after_requeue,
-                }
-            )
-
-        limit_dlq_payload = wait_for_dlq_message("system:health", fail_task["task_id"])
-        requeue_limit_result = requeue_dlq_for_smoke("system:health", fail_task["task_id"])
-        forced_requeue_dlq_payload = wait_for_dlq_message("system:health", fail_task["task_id"])
-        forced_requeue_result = requeue_dlq_for_smoke("system:health", fail_task["task_id"], force=True)
-        forced_dead_lettered_status = wait_for_task_status(fail_task["task_id"], "dead_lettered")
-        forced_requeue_count_status = wait_for_task_requeue_count(fail_task["task_id"], 4)
-        final_dlq_payload = wait_for_dlq_message("system:health", fail_task["task_id"])
+        bid_status = wait_for_task_status(bid_task["task_id"], "succeeded")
+        attachment_status = wait_for_task_status(attachment_task["task_id"], "succeeded")
 
         return {
             "heartbeats": heartbeat_report["workers"],
-            "health_task": health_status,
-            "failed_task": fail_status,
-            "dlq": dlq_payload,
-            "dlq_requeues": dlq_requeues,
-            "dlq_before_requeue_limit_check": limit_dlq_payload,
-            "dlq_requeue_limit_result": requeue_limit_result,
-            "dlq_before_forced_requeue": forced_requeue_dlq_payload,
-            "forced_dlq_requeue_result": forced_requeue_result,
-            "forced_dead_lettered_status": forced_dead_lettered_status,
-            "forced_requeue_count_status": forced_requeue_count_status,
-            "final_dlq": final_dlq_payload,
+            "bid_task": bid_status,
+            "attachment_task": attachment_status,
         }
     finally:
         compose("down", "-v", "--remove-orphans", check=False)
@@ -539,7 +500,7 @@ def build_ops_parser() -> argparse.ArgumentParser:
     workers_parser.add_argument(
         "--queues",
         nargs="*",
-        default=list(DEFAULT_EXPECTED_WORKERS),
+        default=list(list_worker_queue_names()),
         help="queue names to inspect",
     )
     workers_parser.add_argument(
@@ -556,6 +517,9 @@ def build_ops_parser() -> argparse.ArgumentParser:
 
     task_parser = subparsers.add_parser("task", help="inspect stored task lifecycle status")
     task_parser.add_argument("task_id", help="task id to inspect")
+
+    checkpoints_parser = subparsers.add_parser("checkpoints", help="inspect scheduler checkpoints stored in postgres")
+    checkpoints_parser.add_argument("name", nargs="?", help="checkpoint name to inspect")
 
     dlq_parser = subparsers.add_parser("dlq", help="inspect DLQ messages by queue")
     dlq_parser.add_argument(
@@ -586,6 +550,7 @@ def build_ops_parser() -> argparse.ArgumentParser:
         help="bypass catalog-based DLQ requeue limits",
     )
 
+    subparsers.add_parser("validate-config", help="validate task catalog, worker service manifests, and generated compose")
     subparsers.add_parser("smoke", help="run docker compose smoke test")
     return parser
 
@@ -606,6 +571,9 @@ def run_ops_command(args: argparse.Namespace) -> object | None:
     if args.command == "task":
         return asyncio.run(fetch_task(args.task_id))
 
+    if args.command == "checkpoints":
+        return asyncio.run(fetch_checkpoints(args.name))
+
     if args.command == "dlq":
         return asyncio.run(inspect_dlq(args.queues, limit=args.limit))
 
@@ -620,6 +588,9 @@ def run_ops_command(args: argparse.Namespace) -> object | None:
             )
         )
 
+    if args.command == "validate-config":
+        return validate_config()
+
     if args.command == "smoke":
         return run_compose_smoke_test()
 
@@ -627,21 +598,21 @@ def run_ops_command(args: argparse.Namespace) -> object | None:
 
 
 def build_workers_summary(report: dict) -> dict:
-    queues_summary: dict[str, dict] = {}
+    services_summary: dict[str, dict] = {}
     for queue_name, payload in report.get("queues", {}).items():
-        queues_summary[queue_name] = {
+        services_summary[queue_name] = {
             "status": payload.get("status"),
-            "size": payload.get("size"),
+            "queue_size": payload.get("size"),
             "workers": payload.get("observed_workers"),
         }
     return {
         "evaluated_at": report.get("evaluated_at"),
-        "queues": queues_summary,
+        "services": services_summary,
     }
 
 
 def render_workers_table(report: dict) -> str:
-    headers = ["QUEUE", "STATUS", "SIZE", "WORKERS", "HEALTHY", "STALE", "DOWN"]
+    headers = ["SERVICE", "STATUS", "QUEUE_SIZE", "WORKERS", "HEALTHY", "STALE", "DOWN"]
     rows = []
     for queue_name, payload in report.get("queues", {}).items():
         rows.append(
@@ -667,3 +638,114 @@ def render_workers_table(report: dict) -> str:
     lines = [format_row(headers)]
     lines.extend(format_row(row) for row in rows)
     return "\n".join(lines)
+
+
+def validate_config() -> dict:
+    from scripts.generate_compose import render_compose
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    task_definitions = list_task_definitions()
+    service_definitions = list_service_definitions()
+    platform_service_definitions = list_platform_service_definitions()
+    schedule_definitions = list_schedule_definitions()
+    task_queue_names = {definition.queue_name for definition in task_definitions}
+    service_queue_names = {definition.queue_name for definition in service_definitions}
+    task_names = {definition.task_name for definition in task_definitions}
+
+    for definition in task_definitions:
+        module_path = PROJECT_ROOT / (definition.module_path.replace(".", "/") + ".py")
+        if not module_path.exists():
+            errors.append(
+                f"task module does not exist: task_name={definition.task_name} module_path={definition.module_path}"
+            )
+        if definition.max_retries is not None and definition.max_retries < 0:
+            errors.append(f"task max_retries must be >= 0: task_name={definition.task_name}")
+        if definition.timeout_seconds is not None and definition.timeout_seconds <= 0:
+            errors.append(f"task timeout_seconds must be > 0: task_name={definition.task_name}")
+        if definition.backoff_seconds is not None and definition.backoff_seconds < 0:
+            errors.append(f"task backoff_seconds must be >= 0: task_name={definition.task_name}")
+        if definition.payload_schema is not None:
+            schema_module_path, _, schema_name = definition.payload_schema.rpartition(".")
+            schema_module_file = PROJECT_ROOT / (schema_module_path.replace(".", "/") + ".py")
+            if not schema_module_file.exists():
+                errors.append(
+                    f"task payload schema module does not exist: task_name={definition.task_name} payload_schema={definition.payload_schema}"
+                )
+            if not schema_name:
+                errors.append(
+                    f"task payload schema path is invalid: task_name={definition.task_name} payload_schema={definition.payload_schema}"
+                )
+
+    for definition in service_definitions:
+        dockerfile_path = PROJECT_ROOT / definition.dockerfile
+        if not dockerfile_path.exists():
+            errors.append(
+                f"worker service dockerfile does not exist: service_name={definition.service_name} dockerfile={definition.dockerfile}"
+            )
+        for env_file in definition.env_files:
+            env_path = PROJECT_ROOT / env_file
+            if not env_path.exists():
+                errors.append(
+                    f"worker service env file does not exist: service_name={definition.service_name} env_file={env_file}"
+                )
+        if definition.replicas < 1:
+            errors.append(f"worker service replicas must be >= 1: service_name={definition.service_name}")
+
+    for definition in platform_service_definitions:
+        if definition.dockerfile is not None:
+            dockerfile_path = PROJECT_ROOT / definition.dockerfile
+            if not dockerfile_path.exists():
+                errors.append(
+                    f"platform service dockerfile does not exist: service_name={definition.service_name} dockerfile={definition.dockerfile}"
+                )
+        for env_file in definition.env_files:
+            env_path = PROJECT_ROOT / env_file
+            if not env_path.exists():
+                errors.append(
+                    f"platform service env file does not exist: service_name={definition.service_name} env_file={env_file}"
+                )
+
+    schedule_names: set[str] = set()
+    for definition in schedule_definitions:
+        if definition.name in schedule_names:
+            errors.append(f"duplicate schedule name: schedule_name={definition.name}")
+        schedule_names.add(definition.name)
+        if definition.interval_seconds <= 0:
+            errors.append(f"schedule interval_seconds must be > 0: schedule_name={definition.name}")
+        if definition.task_name not in task_names:
+            errors.append(
+                f"schedule task does not exist in task catalog: schedule_name={definition.name} task_name={definition.task_name}"
+            )
+        if definition.queue_name not in service_queue_names:
+            errors.append(
+                f"schedule queue is not backed by any worker service: schedule_name={definition.name} queue_name={definition.queue_name}"
+            )
+
+    for queue_name in sorted(task_queue_names - service_queue_names):
+        errors.append(f"task queue is not backed by any worker service: queue_name={queue_name}")
+
+    for queue_name in sorted(service_queue_names - task_queue_names):
+        warnings.append(f"worker service queue has no tasks in catalog: queue_name={queue_name}")
+
+    current_compose = COMPOSE_FILE.read_text(encoding="utf-8") if COMPOSE_FILE.exists() else ""
+    rendered_compose = render_compose()
+    compose_in_sync = current_compose == rendered_compose
+    if not compose_in_sync:
+        errors.append("generated compose is out of sync: run `python3 scripts/generate_compose.py`")
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "summary": {
+            "task_count": len(task_definitions),
+            "worker_service_count": len(service_definitions),
+            "platform_service_count": len(platform_service_definitions),
+            "schedule_count": len(schedule_definitions),
+            "task_queue_count": len(task_queue_names),
+            "worker_service_queue_count": len(service_queue_names),
+            "compose_in_sync": compose_in_sync,
+        },
+    }

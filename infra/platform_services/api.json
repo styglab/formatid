@@ -1,0 +1,17 @@
+{
+  "service_name": "api",
+  "dockerfile": "infra/images/api/Dockerfile",
+  "build_context": "..",
+  "user": "${UID}:${GID}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "infra/env/api.env"
+  ],
+  "ports": [
+    "8000:8000"
+  ],
+  "depends_on_service_healthy": [
+    "postgres",
+    "redis"
+  ]
+}

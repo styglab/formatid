@@ -1,0 +1,14 @@
+{
+  "service_name": "scheduler",
+  "dockerfile": "infra/images/scheduler/Dockerfile",
+  "build_context": "..",
+  "user": "${UID}:${GID}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "infra/env/scheduler.env"
+  ],
+  "depends_on_service_healthy": [
+    "postgres",
+    "redis"
+  ]
+}

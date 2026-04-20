@@ -1,0 +1,10 @@
+{
+  "service_name": "pps-bid-worker",
+  "queue_name": "pps:bid",
+  "dockerfile": "infra/images/pps_bid/Dockerfile",
+  "env_files": [
+    "infra/env/worker.common.env",
+    "infra/env/worker.pps-bid.env"
+  ],
+  "replicas": 1
+}

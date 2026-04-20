@@ -1,9 +1,9 @@
 import argparse
 import asyncio
 from ops_lib import check_workers, print_json
-from shared.worker_health.health import DEFAULT_EXPECTED_WORKERS
+from shared.service_catalog import list_worker_queue_names
 
-DEFAULT_QUEUES = list(DEFAULT_EXPECTED_WORKERS)
+DEFAULT_QUEUES = list(list_worker_queue_names())
 
 
 def parse_args() -> argparse.Namespace:
