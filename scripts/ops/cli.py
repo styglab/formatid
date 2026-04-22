@@ -3,15 +3,25 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from shared.service_catalog import list_worker_queue_names
-from shared.tasking.catalog import list_queue_names
+from services.catalog.service_catalog import list_worker_queue_names
+from services.task_runtime.catalog import list_queue_names
 from scripts.ops.checkpoints import fetch_checkpoints
 from scripts.ops.common import parse_json_object
 from scripts.ops.dlq import inspect_dlq, requeue_dlq_messages
 from scripts.ops.health import check_workers
+from scripts.ops.observability import prune_observability_data
+from scripts.ops.g2b_ingest import (
+    g2b_ingest_status,
+    reset_g2b_ingest_checkpoint,
+    start_g2b_ingest,
+    stop_g2b_ingest,
+    unblock_g2b_ingest_quota,
+)
 from scripts.ops.smoke import run_compose_smoke_test
 from scripts.ops.tasks import enqueue, fetch_task
 from scripts.ops.validation import validate_config
+from services.task_runtime.queue_control import get_queue_pause, pause_queue, resume_queue
+from scripts.ops.common import get_redis_url
 
 
 def build_ops_parser() -> argparse.ArgumentParser:
@@ -27,6 +37,9 @@ def build_ops_parser() -> argparse.ArgumentParser:
         help='JSON object payload, for example: --payload \'{"source":"cli"}\'',
     )
     enqueue_parser.add_argument("--attempts", type=int, default=0, help="initial attempts count")
+    enqueue_parser.add_argument("--dedupe-key", help="skip enqueue when the same task dedupe key already exists")
+    enqueue_parser.add_argument("--correlation-id", help="cross-task trace id")
+    enqueue_parser.add_argument("--resource-key", help="app resource key for filtering")
 
     workers_parser = subparsers.add_parser("workers", help="inspect worker heartbeats and queue health")
     workers_parser.add_argument(
@@ -50,7 +63,7 @@ def build_ops_parser() -> argparse.ArgumentParser:
     task_parser = subparsers.add_parser("task", help="inspect stored task lifecycle status")
     task_parser.add_argument("task_id", help="task id to inspect")
 
-    checkpoints_parser = subparsers.add_parser("checkpoints", help="inspect scheduler checkpoints stored in postgres")
+    checkpoints_parser = subparsers.add_parser("checkpoints", help="inspect checkpoints stored in postgres")
     checkpoints_parser.add_argument("name", nargs="?", help="checkpoint name to inspect")
 
     dlq_parser = subparsers.add_parser("dlq", help="inspect DLQ messages by queue")
@@ -82,6 +95,36 @@ def build_ops_parser() -> argparse.ArgumentParser:
         help="bypass catalog-based DLQ requeue limits",
     )
 
+    queue_parser = subparsers.add_parser("queue", help="pause, resume, or inspect a queue")
+    queue_subparsers = queue_parser.add_subparsers(dest="queue_command", required=True)
+    queue_pause_parser = queue_subparsers.add_parser("pause", help="pause worker consumption for a queue")
+    queue_pause_parser.add_argument("queue_name", choices=list(list_queue_names()))
+    queue_pause_parser.add_argument("--reason", default="manual")
+    queue_pause_parser.add_argument("--ttl-seconds", type=int)
+    queue_resume_parser = queue_subparsers.add_parser("resume", help="resume worker consumption for a queue")
+    queue_resume_parser.add_argument("queue_name", choices=list(list_queue_names()))
+    queue_status_parser = queue_subparsers.add_parser("status", help="inspect queue pause state")
+    queue_status_parser.add_argument("queue_name", choices=list(list_queue_names()))
+
+    prune_parser = subparsers.add_parser(
+        "prune-observability",
+        help="delete old service_runs and task_executions from internal postgres",
+    )
+    prune_parser.add_argument(
+        "--days",
+        type=int,
+        help="retention days; defaults to OBSERVABILITY_RETENTION_DAYS or 30",
+    )
+
+    g2b_ingest_parser = subparsers.add_parser("g2b_ingest", help="operate G2B Ingest services")
+    g2b_ingest_subparsers = g2b_ingest_parser.add_subparsers(dest="g2b_ingest_command", required=True)
+    g2b_ingest_subparsers.add_parser("start", help="start G2B Ingest service and workers")
+    g2b_ingest_subparsers.add_parser("stop", help="stop G2B Ingest service and workers")
+    g2b_ingest_subparsers.add_parser("status", help="show G2B Ingest service status")
+    reset_parser = g2b_ingest_subparsers.add_parser("reset-checkpoint", help="delete G2B Ingest service checkpoints")
+    reset_parser.add_argument("--from", dest="start", help="document the intended restart start date")
+    g2b_ingest_subparsers.add_parser("unblock-quota", help="clear G2B Ingest quota block from internal stores")
+
     subparsers.add_parser("validate-config", help="validate task catalog, worker service manifests, and generated compose")
     subparsers.add_parser("smoke", help="run docker compose smoke test")
     return parser
@@ -90,11 +133,24 @@ def build_ops_parser() -> argparse.ArgumentParser:
 def run_ops_command(args: argparse.Namespace) -> object | None:
     if args.command == "enqueue":
         payload = parse_json_object(args.payload)
-        message = asyncio.run(enqueue(args.queue_name, args.task_name, payload, args.attempts))
+        message = asyncio.run(
+            enqueue(
+                args.queue_name,
+                args.task_name,
+                payload,
+                args.attempts,
+                dedupe_key=args.dedupe_key,
+                correlation_id=args.correlation_id,
+                resource_key=args.resource_key,
+            )
+        )
         return {
             "queue_name": message.queue_name,
             "task_id": message.task_id,
             "task_name": message.task_name,
+            "dedupe_key": message.dedupe_key,
+            "correlation_id": message.correlation_id,
+            "resource_key": message.resource_key,
         }
 
     if args.command == "workers":
@@ -119,6 +175,36 @@ def run_ops_command(args: argparse.Namespace) -> object | None:
                 force=args.force,
             )
         )
+
+    if args.command == "queue":
+        if args.queue_command == "pause":
+            return asyncio.run(
+                pause_queue(
+                    redis_url=get_redis_url(),
+                    queue_name=args.queue_name,
+                    reason=args.reason,
+                    ttl_seconds=args.ttl_seconds,
+                )
+            )
+        if args.queue_command == "resume":
+            return {"resumed": asyncio.run(resume_queue(redis_url=get_redis_url(), queue_name=args.queue_name))}
+        if args.queue_command == "status":
+            return asyncio.run(get_queue_pause(redis_url=get_redis_url(), queue_name=args.queue_name))
+
+    if args.command == "prune-observability":
+        return asyncio.run(prune_observability_data(days=args.days))
+
+    if args.command == "g2b_ingest":
+        if args.g2b_ingest_command == "start":
+            return start_g2b_ingest()
+        if args.g2b_ingest_command == "stop":
+            return stop_g2b_ingest()
+        if args.g2b_ingest_command == "status":
+            return g2b_ingest_status()
+        if args.g2b_ingest_command == "reset-checkpoint":
+            return reset_g2b_ingest_checkpoint(start=args.start)
+        if args.g2b_ingest_command == "unblock-quota":
+            return unblock_g2b_ingest_quota()
 
     if args.command == "validate-config":
         return validate_config()

@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from shared.tasking.errors import UnknownTaskError
 from shared.tasking.schemas import TaskMessage, TaskResult
 
-TaskHandler = Callable[[TaskMessage], Awaitable[TaskResult]]
+TaskHandler = Callable[..., Awaitable[TaskResult]]
 
 
 class TaskRegistry:

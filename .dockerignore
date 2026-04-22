@@ -1,0 +1,7 @@
+infra/postgres/data
+infra/postgres/data/
+logs/
+**/__pycache__/
+*.pyc
+**/*.pyc
+.git/

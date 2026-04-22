@@ -51,7 +51,7 @@ def wait_for_worker_heartbeats() -> dict:
         payload = json.loads(output)
         last_payload = payload
         workers = payload.get("workers", {})
-        if all(workers.get(queue_name) for queue_name in ("pps:bid", "pps:attachment")):
+        if all(workers.get(queue_name) for queue_name in ("ingest:api", "ingest:file")):
             return payload
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -111,15 +111,15 @@ def run_compose_smoke_test() -> dict:
     try:
         compose(
             "build",
-            "pps-bid-worker",
-            "pps-attachment-worker",
+            "ingest-api-worker",
+            "ingest-file-worker",
         )
         compose(
             "up",
             "-d",
             "redis",
-            "pps-bid-worker",
-            "pps-attachment-worker",
+            "ingest-api-worker",
+            "ingest-file-worker",
         )
 
         heartbeat_report = wait_for_worker_heartbeats()

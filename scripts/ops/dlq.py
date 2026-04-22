@@ -4,16 +4,21 @@ import json
 from typing import Any
 
 from shared.postgres_url import get_checkpoint_database_url
-from shared.tasking.catalog import get_task_definition
-from shared.tasking.execution_store import PostgresTaskExecutionStore
+from services.observability.safe_record import safe_record
+from services.task_runtime.catalog import get_task_definition
+from services.task_runtime.execution_store import PostgresTaskExecutionStore
 from shared.tasking.schemas import TaskMessage
 from shared.time import iso_now
 from scripts.ops.common import build_dlq_queue_name, get_redis_url
 
 
+def _log_event(logger, level, event, **fields) -> None:
+    logger.log(level, "%s %s", event, fields)
+
+
 async def inspect_dlq(queue_names: list[str], *, limit: int) -> dict:
     from redis.asyncio import Redis
-    from shared.tasking.status_store import TaskStatusStore
+    from services.task_runtime.status_store import TaskStatusStore
 
     redis_url = get_redis_url()
     redis = Redis.from_url(redis_url, decode_responses=True)
@@ -58,7 +63,7 @@ async def requeue_dlq_messages(
     force: bool,
 ) -> dict:
     from redis.asyncio import Redis
-    from shared.tasking.status_store import TaskStatusStore
+    from services.task_runtime.status_store import TaskStatusStore
 
     if count < 1:
         raise ValueError("count must be >= 1")
@@ -147,6 +152,7 @@ async def _maybe_requeue_message(
     definition = get_task_definition(message.task_name)
     preserve_attempts = keep_attempts or definition.dlq_requeue_keep_attempts
     policy_snapshot = {
+        "service_name": definition.service_name,
         "queue_name": definition.queue_name,
         "max_retries": definition.max_retries,
         "retryable": definition.retryable,
@@ -177,6 +183,9 @@ async def _maybe_requeue_message(
         payload=message.payload,
         attempts=message.attempts if preserve_attempts else 0,
         task_id=message.task_id,
+        dedupe_key=message.dedupe_key,
+        correlation_id=message.correlation_id,
+        resource_key=message.resource_key,
     )
     requeue_entry = {
         "requeued_at": iso_now(),
@@ -193,9 +202,16 @@ async def _maybe_requeue_message(
         requeue_entry=requeue_entry,
         policy_snapshot=policy_snapshot,
     )
-    try:
-        await execution_store.upsert(status_document)
-    except Exception:
-        pass
+    import logging
+
+    await safe_record(
+        execution_store.upsert(status_document),
+        logger=logging.getLogger("ops.dlq"),
+        log_event=_log_event,
+        event="task_execution_history_record_failed",
+        task_id=status_document.get("task_id"),
+        task_name=status_document.get("task_name"),
+        status=status_document.get("status"),
+    )
     await redis.rpush(queue_name, json.dumps(requeued_message.to_dict()))
     return {"message": requeued_message}

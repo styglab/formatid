@@ -5,7 +5,8 @@ sandbox/
 tmp/
 old/
 infra/postgres/data/
-
+infra/qdrant/storage/
+.codex
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

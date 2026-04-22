@@ -11,7 +11,7 @@ class Settings:
     log_level: str = "INFO"
     queue_poll_interval: float = 1.0
     redis_url: str = "redis://localhost:6379/0"
-    worker_queue_name: str = "pps:bid"
+    worker_queue_name: str = "ingest:api"
     redis_block_timeout: int = 5
     worker_heartbeat_interval: int = 10
     worker_heartbeat_ttl: int = 30
@@ -33,7 +33,7 @@ def get_settings() -> Settings:
         log_level=os.getenv("WORKER_LOG_LEVEL", "INFO"),
         queue_poll_interval=float(os.getenv("WORKER_QUEUE_POLL_INTERVAL", "1.0")),
         redis_url=os.getenv("WORKER_REDIS_URL", "redis://localhost:6379/0"),
-        worker_queue_name=os.getenv("WORKER_QUEUE_NAME", "pps:bid"),
+        worker_queue_name=os.getenv("WORKER_QUEUE_NAME", "ingest:api"),
         redis_block_timeout=int(os.getenv("WORKER_REDIS_BLOCK_TIMEOUT", "5")),
         worker_heartbeat_interval=int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10")),
         worker_heartbeat_ttl=int(os.getenv("WORKER_HEARTBEAT_TTL", "30")),

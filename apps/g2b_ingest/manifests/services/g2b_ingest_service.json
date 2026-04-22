@@ -1,0 +1,20 @@
+{
+  "service_name": "g2b-ingest",
+  "service_type": "cron",
+  "dockerfile": "apps/g2b_ingest/infra/images/g2b_ingest_service/Dockerfile",
+  "build_context": "..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "infra/env/postgres.env",
+    "apps/g2b_ingest/infra/env/g2b_ingest_service.env",
+    "infra/env/worker.common.env",
+    "apps/g2b_ingest/infra/env/service.env",
+    "apps/g2b_ingest/infra/env/api.env",
+    "apps/g2b_ingest/infra/env/ingest.env"
+  ],
+  "depends_on_service_healthy": [
+    "postgres",
+    "redis"
+  ]
+}

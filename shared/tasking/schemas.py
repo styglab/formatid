@@ -14,6 +14,9 @@ class TaskMessage:
     attempts: int = 0
     task_id: str = field(default_factory=lambda: str(uuid4()))
     enqueued_at: datetime = field(default_factory=now)
+    dedupe_key: str | None = None
+    correlation_id: str | None = None
+    resource_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

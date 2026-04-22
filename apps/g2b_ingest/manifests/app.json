@@ -1,0 +1,27 @@
+{
+  "app": "g2b_ingest",
+  "description": "G2B Ingest bid notice collection app",
+  "data_store": {
+    "type": "postgres",
+    "env": "G2B_INGEST_DATABASE_URL",
+    "schema": "raw",
+    "sql": "apps/g2b_ingest/sql/raw_schema.sql"
+  },
+  "checkpoint_store": {
+    "type": "internal_postgres"
+  },
+  "dashboard": {
+    "summary": "apps.g2b_ingest.dashboard.build_g2b_ingest_dashboard_summary",
+    "env_files": [
+      "apps/g2b_ingest/infra/env/api.env"
+    ]
+  },
+  "worker_env_files": {
+    "ingest-api-worker": [
+      "apps/g2b_ingest/infra/env/ingest.env"
+    ],
+    "ingest-file-worker": [
+      "apps/g2b_ingest/infra/env/ingest.env"
+    ]
+  }
+}

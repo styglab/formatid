@@ -19,9 +19,9 @@ class ServiceHealthSummary(BaseModel):
     workers: int
 
 
-class SchedulerHealthSummary(BaseModel):
+class AppServicesHealthSummary(BaseModel):
     status: Literal["healthy", "degraded", "down"]
-    schedulers: int
+    services: int
 
 
 class ReadinessResponse(BaseModel):
@@ -29,7 +29,7 @@ class ReadinessResponse(BaseModel):
     evaluated_at: str
     redis: RedisHealth
     services: dict[str, ServiceHealthSummary]
-    scheduler: SchedulerHealthSummary | None = None
+    app_services: AppServicesHealthSummary | None = None
 
 
 class HealthResponse(BaseModel):
@@ -37,7 +37,7 @@ class HealthResponse(BaseModel):
     evaluated_at: str
     redis: RedisHealth
     services: dict[str, ServiceHealthSummary]
-    scheduler: SchedulerHealthSummary | None = None
+    app_services: AppServicesHealthSummary | None = None
 
 
 class WorkerHealthEntry(BaseModel):
@@ -70,8 +70,8 @@ class WorkersHealthResponse(BaseModel):
     redis_url: str
 
 
-class SchedulerHealthEntry(BaseModel):
-    scheduler_id: str
+class AppServiceHealthEntry(BaseModel):
+    service_id: str
     app_name: str
     hostname: str
     pid: int
@@ -81,13 +81,13 @@ class SchedulerHealthEntry(BaseModel):
     health_status: str
 
 
-class SchedulerHealthResponse(BaseModel):
+class AppServicesHealthResponse(BaseModel):
     evaluated_at: str
     status: Literal["healthy", "degraded", "down"]
     policy: dict[str, Any]
-    scheduler_count: int
-    healthy_schedulers: int
-    stale_schedulers: int
-    down_schedulers: int
-    schedulers: list[SchedulerHealthEntry]
+    service_count: int
+    healthy_services: int
+    stale_services: int
+    down_services: int
+    services: list[AppServiceHealthEntry]
     redis_url: str

@@ -1,0 +1,26 @@
+{
+  "ingest.api.fetch": {
+    "service_name": "ingest-api-worker",
+    "queue_name": "ingest:api",
+    "module_path": "services.ingest.tasks.api",
+    "payload_schema": "services.ingest.tasks.schemas.ApiFetchStorePayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  },
+  "ingest.file.download": {
+    "service_name": "ingest-file-worker",
+    "queue_name": "ingest:file",
+    "module_path": "services.ingest.tasks.file",
+    "payload_schema": "services.ingest.tasks.schemas.FileDownloadStorePayload",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 300,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

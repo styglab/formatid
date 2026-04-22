@@ -1,0 +1,18 @@
+{
+  "app": "g2b_summary",
+  "description": "Sample G2B document summary app",
+  "data_store": {
+    "type": "postgres",
+    "env": "G2B_SUMMARY_DATABASE_URL",
+    "schema": "summary",
+    "sql": "apps/g2b_summary/sql/schema.sql"
+  },
+  "worker_env_files": {
+    "extract-text-worker": [
+      "apps/g2b_summary/infra/env/worker.env"
+    ],
+    "serve-llm-worker": [
+      "apps/g2b_summary/infra/env/worker.env"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "service_name": "serve-llm-worker",
+  "queue_name": "serve:llm",
+  "dockerfile": "infra/images/workers/serve_llm/Dockerfile",
+  "env_files": [
+    "infra/env/postgres.env",
+    "infra/env/worker.common.env",
+    "infra/env/workers/worker.serve_llm.env"
+  ],
+  "replicas": 1
+}
