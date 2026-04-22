@@ -19,6 +19,7 @@ from scripts.ops.common import (
 from scripts.ops.compose import compose, compose_run_python
 from scripts.ops.dlq import inspect_dlq, requeue_dlq_messages
 from scripts.ops.health import build_workers_summary, check_workers, render_workers_table
+from scripts.ops.observability import get_observability_retention_days, prune_observability_data
 from scripts.ops.smoke import (
     enqueue_for_smoke,
     requeue_dlq_for_smoke,
@@ -45,12 +46,14 @@ __all__ = [
     "fetch_task",
     "get_dlq_suffix",
     "get_redis_url",
+    "get_observability_retention_days",
     "inspect_dlq",
     "parse_json_object",
     "print_json",
     "render_workers_table",
     "requeue_dlq_for_smoke",
     "requeue_dlq_messages",
+    "prune_observability_data",
     "run_command",
     "run_compose_smoke_test",
     "run_ops_command",

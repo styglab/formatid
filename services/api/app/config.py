@@ -16,8 +16,8 @@ class Settings:
     checkpoint_database_url: str = ""
     worker_heartbeat_interval: int = 10
     worker_heartbeat_ttl: int = 30
-    scheduler_heartbeat_interval: int = 10
-    scheduler_heartbeat_ttl: int = 30
+    service_heartbeat_interval: int = 10
+    service_heartbeat_ttl: int = 30
 
 
 @lru_cache
@@ -32,6 +32,6 @@ def get_settings() -> Settings:
         checkpoint_database_url=get_checkpoint_database_url(host_default="postgres"),
         worker_heartbeat_interval=int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10")),
         worker_heartbeat_ttl=int(os.getenv("WORKER_HEARTBEAT_TTL", "30")),
-        scheduler_heartbeat_interval=int(os.getenv("SCHEDULER_HEARTBEAT_INTERVAL", "10")),
-        scheduler_heartbeat_ttl=int(os.getenv("SCHEDULER_HEARTBEAT_TTL", "30")),
+        service_heartbeat_interval=int(os.getenv("SERVICE_HEARTBEAT_INTERVAL", "10")),
+        service_heartbeat_ttl=int(os.getenv("SERVICE_HEARTBEAT_TTL", "30")),
     )

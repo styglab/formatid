@@ -1,6 +1,6 @@
 from importlib import import_module
 
-from shared.tasking.catalog import list_task_module_paths_for_queue
+from services.task_runtime.catalog import list_task_module_paths_for_queue
 
 
 def load_task_modules(*, queue_name: str) -> None:

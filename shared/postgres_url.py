@@ -18,3 +18,12 @@ def build_postgres_url(*, host_default: str = "localhost") -> str:
 
 def get_checkpoint_database_url(*, host_default: str = "localhost") -> str:
     return os.getenv("CHECKPOINT_DATABASE_URL") or build_postgres_url(host_default=host_default)
+
+
+def get_database_url(env_name: str, *, host_default: str = "postgres") -> str:
+    value = os.getenv(env_name)
+    if value:
+        return value
+    if env_name == "POSTGRES_DATABASE_URL":
+        return build_postgres_url(host_default=host_default)
+    raise RuntimeError(f"{env_name} is not configured")

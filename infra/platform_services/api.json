@@ -14,5 +14,16 @@
   "depends_on_service_healthy": [
     "postgres",
     "redis"
-  ]
+  ],
+  "healthcheck": {
+    "test": [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+    ],
+    "interval": "5s",
+    "timeout": "3s",
+    "retries": 10
+  }
 }

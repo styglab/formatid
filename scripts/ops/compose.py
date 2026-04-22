@@ -21,7 +21,7 @@ def compose_run_python(*python_args: str) -> str:
         "run",
         "--rm",
         "--no-deps",
-        "pps-bid-worker",
+        "ingest-api-worker",
         "python",
         *python_args,
     )

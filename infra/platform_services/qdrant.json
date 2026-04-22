@@ -1,0 +1,19 @@
+{
+  "service_name": "qdrant",
+  "service_type": "vector_db",
+  "image": "qdrant/qdrant:v1.13.4",
+  "restart": "unless-stopped",
+  "ports": [
+    "${QDRANT_HOST_PORT:-6333}:6333",
+    "${QDRANT_GRPC_HOST_PORT:-6334}:6334"
+  ],
+  "volumes": [
+    "${QDRANT_DATA_DIR:-./qdrant/storage}:/qdrant/storage"
+  ],
+  "healthcheck": {
+    "test": ["CMD-SHELL", "bash -c ': > /dev/tcp/127.0.0.1/6333'"],
+    "interval": "10s",
+    "timeout": "5s",
+    "retries": 12
+  }
+}

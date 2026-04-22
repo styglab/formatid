@@ -1,5 +1,6 @@
 import logging
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,8 +40,11 @@ class DatePartitionedFileHandler(logging.Handler):
         self.file_stem = file_stem
         self._current_path: Path | None = None
         self._stream = None
+        self._disabled_reason: str | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
+        if self._disabled_reason is not None:
+            return
         try:
             target_path = self._build_target_path()
             if target_path != self._current_path:
@@ -49,6 +53,24 @@ class DatePartitionedFileHandler(logging.Handler):
                 return
             self._stream.write(self.format(record) + "\n")
             self._stream.flush()
+        except OSError as exc:
+            self._disabled_reason = str(exc)
+            sys.stderr.write(
+                json.dumps(
+                    {
+                        "timestamp": now().isoformat(),
+                        "level": "warning",
+                        "logger": __name__,
+                        "message": "worker_file_logging_disabled",
+                        "event": "worker_file_logging_disabled",
+                        "log_dir": str(self.base_dir),
+                        "reason": self._disabled_reason,
+                    },
+                    ensure_ascii=True,
+                    default=str,
+                )
+                + "\n"
+            )
         except Exception:
             self.handleError(record)
 
@@ -95,6 +117,8 @@ def configure_logging() -> None:
 
     root_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     root_logger.propagate = False
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:

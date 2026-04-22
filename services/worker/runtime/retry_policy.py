@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from shared.tasking.catalog import get_task_definition
+from services.task_runtime.catalog import get_task_definition
 from shared.tasking.errors import (
     InvalidTaskPayloadError,
     InvalidTaskRouteError,
@@ -11,6 +11,7 @@ from shared.tasking.errors import (
     UnknownTaskRoutingError,
     WorkerTaskNotAllowedError,
 )
+from shared.tasking.exceptions import NonRetryableTaskError, RetryableTaskError
 
 
 FailureAction = Literal["retry", "dead_letter", "fail"]
@@ -18,6 +19,7 @@ FailureAction = Literal["retry", "dead_letter", "fail"]
 
 @dataclass(frozen=True)
 class TaskPolicy:
+    service_name: str
     max_retries: int
     payload_schema: str | None
     retryable: bool
@@ -27,6 +29,7 @@ class TaskPolicy:
 
     def to_snapshot(self) -> dict[str, int | bool | str | None]:
         return {
+            "service_name": self.service_name,
             "max_retries": self.max_retries,
             "payload_schema": self.payload_schema,
             "retryable": self.retryable,
@@ -50,6 +53,7 @@ NON_RETRYABLE_ERRORS = (
     UnknownTaskRoutingError,
     UnknownTaskError,
     WorkerTaskNotAllowedError,
+    NonRetryableTaskError,
 )
 
 
@@ -62,6 +66,7 @@ def build_task_policy(
 ) -> TaskPolicy:
     definition = get_task_definition(task_name)
     return TaskPolicy(
+        service_name=definition.service_name,
         max_retries=default_max_retries if definition.max_retries is None else definition.max_retries,
         payload_schema=definition.payload_schema,
         retryable=definition.retryable,
@@ -80,6 +85,8 @@ def build_task_policy(
 
 
 def is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, RetryableTaskError):
+        return True
     return not isinstance(exc, NON_RETRYABLE_ERRORS)
 
 

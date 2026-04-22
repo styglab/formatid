@@ -3,12 +3,15 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from shared.platform_service_catalog import list_platform_service_definitions
-from shared.schedule_catalog import list_schedule_definitions
-from shared.service_catalog import list_service_definitions
-from shared.tasking.catalog import list_task_definitions
-from shared.domain_catalog import iter_domain_manifest_paths, load_json_file
+from services.catalog.platform_service_catalog import list_platform_service_definitions
+from services.catalog.app_service_catalog import list_app_service_definitions
+from services.catalog.service_catalog import list_service_definitions
+from services.task_runtime.catalog import list_task_definitions
+from services.catalog.app_catalog import iter_app_manifest_paths, load_json_file
 from scripts.ops.common import COMPOSE_FILE, PROJECT_ROOT
+
+
+APP_SERVICE_TYPES = {"cron", "api", "consumer", "service"}
 
 
 def validate_config() -> dict:
@@ -20,43 +23,57 @@ def validate_config() -> dict:
     task_definitions = list_task_definitions()
     service_definitions = list_service_definitions()
     platform_service_definitions = list_platform_service_definitions()
-    schedule_definitions = list_schedule_definitions()
+    app_service_definitions = list_app_service_definitions()
     task_queue_names = {definition.queue_name for definition in task_definitions}
     service_queue_names = {definition.queue_name for definition in service_definitions}
-    task_names = {definition.task_name for definition in task_definitions}
-    task_by_name = {definition.task_name: definition for definition in task_definitions}
 
-    for path in iter_domain_manifest_paths():
+    for path in iter_app_manifest_paths():
         payload = load_json_file(path)
         if not isinstance(payload, dict):
-            errors.append(f"domain manifest must be an object: path={path}")
+            errors.append(f"app manifest must be an object: path={path}")
             continue
-        domain_name = payload.get("domain")
-        if not domain_name:
-            errors.append(f"domain manifest must define domain: path={path}")
-        elif domain_name != path.parent.parent.name:
+        app_name = payload.get("app")
+        if not app_name:
+            errors.append(f"app manifest must define app: path={path}")
+        elif app_name != path.parent.parent.name:
             errors.append(
-                f"domain manifest domain must match directory name: path={path} domain={domain_name} directory={path.parent.parent.name}"
+                f"app manifest app must match directory name: path={path} app={app_name} directory={path.parent.parent.name}"
             )
         data_store = payload.get("data_store")
         if isinstance(data_store, dict):
             sql_path = data_store.get("sql")
             if sql_path and not (PROJECT_ROOT / sql_path).exists():
-                errors.append(f"domain data_store sql file does not exist: domain={domain_name} sql={sql_path}")
-        for env_file in payload.get("scheduler_env_files", []):
-            if not (PROJECT_ROOT / env_file).exists():
-                errors.append(f"domain scheduler env file does not exist: domain={domain_name} env_file={env_file}")
-
+                errors.append(f"app data_store sql file does not exist: app={app_name} sql={sql_path}")
+        dashboard = payload.get("dashboard")
+        if isinstance(dashboard, dict):
+            for env_file in dashboard.get("env_files", []):
+                if not (PROJECT_ROOT / env_file).exists():
+                    errors.append(f"app dashboard env file does not exist: app={app_name} env_file={env_file}")
+        worker_env_files = payload.get("worker_env_files")
+        if isinstance(worker_env_files, dict):
+            for service_name, env_files in worker_env_files.items():
+                for env_file in env_files:
+                    if not (PROJECT_ROOT / env_file).exists():
+                        errors.append(
+                            f"app worker env file does not exist: app={app_name} service_name={service_name} env_file={env_file}"
+                        )
     for definition in task_definitions:
-        task_domain = _domain_from_task_module(definition.module_path)
-        if task_domain is None:
+        task_app = _app_from_task_module(definition.module_path)
+        runtime_namespace = _runtime_task_namespace(definition.module_path)
+        runtime_task_package = _runtime_task_package(definition.module_path)
+        if task_app is None and runtime_namespace is None:
             errors.append(
-                f"task module_path must be inside domain tasks: task_name={definition.task_name} module_path={definition.module_path}"
+                f"task module_path must be inside app tasks or runtime task packages: task_name={definition.task_name} module_path={definition.module_path}"
             )
-        elif not definition.task_name.startswith(f"{task_domain}."):
-            errors.append(
-                f"task_name must start with its domain prefix: task_name={definition.task_name} domain={task_domain}"
-            )
+        elif not definition.task_name.startswith(f"{task_app}."):
+            if task_app is not None:
+                errors.append(
+                    f"task_name must start with its app prefix: task_name={definition.task_name} app={task_app}"
+                )
+            elif runtime_namespace is not None and not definition.task_name.startswith(f"{runtime_namespace}."):
+                errors.append(
+                    f"runtime task_name must start with its namespace prefix: task_name={definition.task_name} namespace={runtime_namespace}"
+                )
         module_path = _module_file_path(definition.module_path)
         if not module_path.exists():
             errors.append(
@@ -70,9 +87,13 @@ def validate_config() -> dict:
             errors.append(f"task backoff_seconds must be >= 0: task_name={definition.task_name}")
         if definition.payload_schema is not None:
             schema_module_path, _, schema_name = definition.payload_schema.rpartition(".")
-            if task_domain is not None and not schema_module_path.startswith(f"domains.{task_domain}.tasks."):
+            if task_app is not None and not schema_module_path.startswith(f"apps.{task_app}.tasks."):
                 errors.append(
-                    f"task payload_schema must be inside the same domain tasks package: task_name={definition.task_name} payload_schema={definition.payload_schema}"
+                    f"task payload_schema must be inside the same app tasks package: task_name={definition.task_name} payload_schema={definition.payload_schema}"
+                )
+            if runtime_task_package is not None and not schema_module_path.startswith(f"{runtime_task_package}."):
+                errors.append(
+                    f"runtime task payload_schema must be inside the same runtime task package: task_name={definition.task_name} payload_schema={definition.payload_schema}"
                 )
             schema_module_file = _module_file_path(schema_module_path)
             if not schema_module_file.exists():
@@ -129,51 +150,22 @@ def validate_config() -> dict:
                     f"platform service env file does not exist: service_name={definition.service_name} env_file={env_file}"
                 )
 
-    schedule_names: set[str] = set()
-    for definition in schedule_definitions:
-        if definition.name in schedule_names:
-            errors.append(f"duplicate schedule name: schedule_name={definition.name}")
-        schedule_names.add(definition.name)
-        if definition.interval_seconds <= 0:
-            errors.append(f"schedule interval_seconds must be > 0: schedule_name={definition.name}")
-        if definition.lock_ttl_seconds is not None and definition.lock_ttl_seconds <= 0:
-            errors.append(f"schedule lock_ttl_seconds must be > 0: schedule_name={definition.name}")
-        if definition.misfire_grace_seconds <= 0:
-            errors.append(f"schedule misfire_grace_seconds must be > 0: schedule_name={definition.name}")
-        if definition.max_instances <= 0:
-            errors.append(f"schedule max_instances must be > 0: schedule_name={definition.name}")
-        if definition.task_name not in task_names:
+    for definition in app_service_definitions:
+        if definition.service_type not in APP_SERVICE_TYPES:
             errors.append(
-                f"schedule task does not exist in task catalog: schedule_name={definition.name} task_name={definition.task_name}"
+                f"app service_type is not supported: service_name={definition.service_name} service_type={definition.service_type}"
             )
-        else:
-            task_definition = task_by_name[definition.task_name]
-            if definition.queue_name != task_definition.queue_name:
+        if definition.dockerfile is not None:
+            dockerfile_path = PROJECT_ROOT / definition.dockerfile
+            if not dockerfile_path.exists():
                 errors.append(
-                    f"schedule queue_name must match task queue_name: schedule_name={definition.name} schedule_queue={definition.queue_name} task_queue={task_definition.queue_name}"
+                    f"app service dockerfile does not exist: service_name={definition.service_name} dockerfile={definition.dockerfile}"
                 )
-        if definition.queue_name not in service_queue_names:
-            errors.append(
-                f"schedule queue is not backed by any worker service: schedule_name={definition.name} queue_name={definition.queue_name}"
-            )
-        if definition.payload_factory is not None:
-            factory_module_path, _, factory_name = definition.payload_factory.rpartition(".")
-            factory_file = _module_file_path(factory_module_path)
-            if not factory_module_path or not factory_name:
+        for env_file in definition.env_files:
+            env_path = PROJECT_ROOT / env_file
+            if not env_path.exists():
                 errors.append(
-                    f"schedule payload_factory path is invalid: schedule_name={definition.name} payload_factory={definition.payload_factory}"
-                )
-            elif not factory_file.exists():
-                errors.append(
-                    f"schedule payload_factory module does not exist: schedule_name={definition.name} payload_factory={definition.payload_factory}"
-                )
-            elif not _module_has_ast_name(
-                factory_file,
-                factory_name,
-                allowed_node_types=(ast.FunctionDef, ast.AsyncFunctionDef),
-            ):
-                errors.append(
-                    f"schedule payload_factory function does not exist: schedule_name={definition.name} payload_factory={definition.payload_factory}"
+                    f"app service env file does not exist: service_name={definition.service_name} env_file={env_file}"
                 )
 
     for queue_name in sorted(task_queue_names - service_queue_names):
@@ -196,7 +188,7 @@ def validate_config() -> dict:
             "task_count": len(task_definitions),
             "worker_service_count": len(service_definitions),
             "platform_service_count": len(platform_service_definitions),
-            "schedule_count": len(schedule_definitions),
+            "app_service_count": len(app_service_definitions),
             "task_queue_count": len(task_queue_names),
             "worker_service_queue_count": len(service_queue_names),
             "compose_in_sync": compose_in_sync,
@@ -208,11 +200,31 @@ def _module_file_path(module_path: str) -> Path:
     return PROJECT_ROOT / (module_path.replace(".", "/") + ".py")
 
 
-def _domain_from_task_module(module_path: str) -> str | None:
+def _app_from_task_module(module_path: str) -> str | None:
     parts = module_path.split(".")
-    if len(parts) < 4 or parts[0] != "domains" or parts[2] != "tasks":
+    if len(parts) < 4 or parts[0] != "apps" or parts[2] != "tasks":
         return None
     return parts[1]
+
+
+def _runtime_task_namespace(module_path: str) -> str | None:
+    parts = module_path.split(".")
+    if len(parts) < 3:
+        return None
+    return {
+        "ingest": "ingest",
+        "extract": "extract",
+        "llm": "serve",
+    }.get(parts[1])
+
+
+def _runtime_task_package(module_path: str) -> str | None:
+    parts = module_path.split(".")
+    if len(parts) < 4 or parts[0] != "services" or parts[2] != "tasks":
+        return None
+    if parts[1] in {"ingest", "extract", "llm"}:
+        return ".".join(parts[:3])
+    return None
 
 
 def _module_has_ast_name(

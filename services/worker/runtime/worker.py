@@ -5,13 +5,14 @@ import os
 import signal
 import sys
 import traceback
+from datetime import timedelta
 from pathlib import Path
 from socket import gethostname
 
 def find_project_root() -> Path:
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "domains").exists() and (parent / "shared").exists():
+        if (parent / "apps").exists() and (parent / "shared").exists():
             return parent
     raise RuntimeError("project root not found")
 
@@ -30,17 +31,21 @@ from services.worker.runtime.retry_policy import (
     decide_failure_action,
 )
 from services.worker.runtime.task_loader import load_task_modules
-from shared.tasking.catalog import list_task_names_for_queue
+from services.task_runtime.catalog import list_task_names_for_queue
 from shared.tasking.errors import (
     WorkerTaskNotAllowedError,
 )
 from shared.postgres_url import get_checkpoint_database_url
-from shared.tasking.execution_store import PostgresTaskExecutionStore
+from services.observability.safe_record import safe_record
+from services.task_runtime.context import TaskContext
+from services.task_runtime.execution_store import PostgresTaskExecutionStore
+from services.task_runtime.queue_control import get_queue_pause
 from shared.tasking.registry import registry
-from shared.tasking.routing import validate_task_route
-from shared.tasking.status_store import TaskStatusStore
-from shared.tasking.validation import validate_task_payload
-from shared.worker_health.store import WorkerHeartbeatStore
+from services.task_runtime.routing import validate_task_route
+from services.task_runtime.status_store import TaskStatusStore
+from services.task_runtime.validation import validate_task_payload
+from shared.time import now
+from services.worker.runtime.health.store import WorkerHeartbeatStore
 
 logger = get_logger("worker.main")
 
@@ -105,26 +110,56 @@ async def requeue_message(*, message, queue_name: str) -> None:
         await queue.close()
 
 
+def clone_message_for_requeue(*, message, attempts: int) -> object:
+    return message.__class__(
+        queue_name=message.queue_name,
+        task_name=message.task_name,
+        payload=message.payload,
+        attempts=attempts,
+        task_id=message.task_id,
+        enqueued_at=message.enqueued_at,
+        dedupe_key=getattr(message, "dedupe_key", None),
+        correlation_id=getattr(message, "correlation_id", None),
+        resource_key=getattr(message, "resource_key", None),
+    )
+
+
 async def record_execution_history(
     *,
     execution_store: PostgresTaskExecutionStore,
     status_document: dict,
     worker_id: str,
 ) -> None:
+    await safe_record(
+        execution_store.upsert(status_document),
+        logger=logger,
+        log_event=log_event,
+        event="task_execution_history_record_failed",
+        worker_id=worker_id,
+        task_id=status_document.get("task_id"),
+        task_name=status_document.get("task_name"),
+        status=status_document.get("status"),
+    )
+
+
+async def run_task_with_lease_heartbeat(
+    *,
+    message,
+    context: TaskContext,
+    timeout_seconds: int,
+) -> object:
+    task = asyncio.create_task(execute_task(message, context=context))
+    heartbeat_interval = max(5, min(30, max(1, timeout_seconds // 3)))
     try:
-        await execution_store.upsert(status_document)
-    except Exception as exc:
-        log_event(
-            logger,
-            logging.WARNING,
-            "task_execution_history_record_failed",
-            worker_id=worker_id,
-            task_id=status_document.get("task_id"),
-            task_name=status_document.get("task_name"),
-            status=status_document.get("status"),
-            error_type=type(exc).__name__,
-            error_message=str(exc),
-        )
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_interval)
+            except asyncio.TimeoutError:
+                await context.heartbeat()
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
 
 
 async def run_heartbeat_loop(*, store: WorkerHeartbeatStore, shutdown_event: asyncio.Event) -> None:
@@ -216,6 +251,26 @@ async def _wait_for_next_message(
     return queue_task.result(), False
 
 
+async def _wait_while_queue_paused(*, queue_name: str, shutdown_event: asyncio.Event) -> bool:
+    settings = get_settings()
+    pause = await get_queue_pause(redis_url=settings.redis_url, queue_name=queue_name)
+    if pause is None:
+        return False
+    log_event(
+        logger,
+        logging.WARNING,
+        "worker_queue_paused",
+        queue_name=queue_name,
+        reason=pause.get("reason"),
+        paused_at=pause.get("paused_at"),
+    )
+    try:
+        await asyncio.wait_for(shutdown_event.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        return True
+    return True
+
+
 async def _process_message(
     *,
     message,
@@ -246,6 +301,7 @@ async def _process_message(
             )
         message.payload = validate_task_payload(task_name=message.task_name, payload=message.payload)
         task_policy = get_task_policy(message.task_name)
+        deadline_at = now() + timedelta(seconds=task_policy.timeout_seconds)
         status_document = await status_store.mark_running(
             message,
             worker_id=worker_id,
@@ -256,7 +312,21 @@ async def _process_message(
             status_document=status_document,
             worker_id=worker_id,
         )
-        result = await asyncio.wait_for(execute_task(message), timeout=task_policy.timeout_seconds)
+        context = TaskContext(
+            message=message,
+            service_name=task_policy.service_name,
+            worker_id=worker_id,
+            deadline_at=deadline_at,
+            execution_store=execution_store,
+        )
+        result = await asyncio.wait_for(
+            run_task_with_lease_heartbeat(
+                message=message,
+                context=context,
+                timeout_seconds=task_policy.timeout_seconds,
+            ),
+            timeout=task_policy.timeout_seconds,
+        )
         status_document = await status_store.mark_succeeded(
             message,
             result,
@@ -301,14 +371,7 @@ async def _process_message(
         policy_snapshot = task_policy.to_snapshot()
 
         if decision.action == "retry":
-            retry_message = message.__class__(
-                queue_name=message.queue_name,
-                task_name=message.task_name,
-                payload=message.payload,
-                attempts=decision.next_attempts,
-                task_id=message.task_id,
-                enqueued_at=message.enqueued_at,
-            )
+            retry_message = clone_message_for_requeue(message=message, attempts=decision.next_attempts)
             if task_policy.backoff_seconds > 0:
                 await asyncio.sleep(task_policy.backoff_seconds)
             await requeue_message(message=retry_message, queue_name=message.queue_name)
@@ -340,14 +403,7 @@ async def _process_message(
                 worker_id=worker_id,
             )
         elif decision.action == "dead_letter":
-            dlq_message = message.__class__(
-                queue_name=message.queue_name,
-                task_name=message.task_name,
-                payload=message.payload,
-                attempts=decision.terminal_attempts,
-                task_id=message.task_id,
-                enqueued_at=message.enqueued_at,
-            )
+            dlq_message = clone_message_for_requeue(message=message, attempts=decision.terminal_attempts)
             dlq_queue_name = build_dlq_queue_name(queue_name=message.queue_name)
             await requeue_message(message=dlq_message, queue_name=dlq_queue_name)
             log_event(
@@ -438,6 +494,16 @@ async def run_worker(*, once: bool) -> None:
         heartbeat_task = asyncio.create_task(
             run_heartbeat_loop(store=heartbeat_store, shutdown_event=shutdown_event)
         )
+        stale_count = await execution_store.interrupt_expired_leases(queue_name=settings.worker_queue_name)
+        if stale_count:
+            log_event(
+                logger,
+                logging.WARNING,
+                "expired_task_leases_interrupted",
+                worker_id=worker_id,
+                queue_name=settings.worker_queue_name,
+                count=stale_count,
+            )
         log_event(
             logger,
             logging.INFO,
@@ -458,6 +524,9 @@ async def run_worker(*, once: bool) -> None:
                     queue_name=settings.worker_queue_name,
                 )
                 break
+
+            if await _wait_while_queue_paused(queue_name=settings.worker_queue_name, shutdown_event=shutdown_event):
+                continue
 
             message, shutdown_requested = await _wait_for_next_message(
                 queue=queue,
