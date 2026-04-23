@@ -7,6 +7,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ops.checkpoints import fetch_checkpoints
+from scripts.ops.boundaries import lint_boundaries
+from scripts.ops.check_all import check_all
 from scripts.ops.cli import build_ops_parser, run_ops_command
 from scripts.ops.common import (
     build_dlq_queue_name,
@@ -38,6 +40,7 @@ __all__ = [
     "build_ops_parser",
     "build_workers_summary",
     "check_workers",
+    "check_all",
     "compose",
     "compose_run_python",
     "enqueue",
@@ -48,6 +51,7 @@ __all__ = [
     "get_redis_url",
     "get_observability_retention_days",
     "inspect_dlq",
+    "lint_boundaries",
     "parse_json_object",
     "print_json",
     "render_workers_table",

@@ -1,0 +1,11 @@
+{
+  "service_name": "extract-text-worker",
+  "queue": "extract.text",
+  "dockerfile": "services/extract/infra/image/Dockerfile",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "deploy/compose/env/worker.common.env",
+    "deploy/compose/env/workers/worker.extract_text.env"
+  ],
+  "replicas": 1
+}

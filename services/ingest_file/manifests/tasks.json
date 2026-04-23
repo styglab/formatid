@@ -1,0 +1,14 @@
+{
+  "ingest.file.download": {
+    "queue": "ingest.file",
+    "module_path": "services.ingest_file.app.tasks.file",
+    "payload_schema": "services.ingest_file.app.contracts.file_download.FileDownloadPayload",
+    "output_schema": "services.ingest_file.app.contracts.file_download.FileDownloadOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 300,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

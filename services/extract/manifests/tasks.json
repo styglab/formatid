@@ -1,9 +1,8 @@
 {
   "extract.text.run": {
-    "service_name": "extract-text-worker",
-    "queue_name": "extract:text",
-    "module_path": "services.extract.tasks.text",
-    "payload_schema": "services.extract.tasks.schemas.TextExtractStorePayload",
+    "queue": "extract.text",
+    "module_path": "services.extract.app.tasks.text",
+    "payload_schema": "services.extract.app.tasks.schemas.TextExtractStorePayload",
     "max_retries": 3,
     "retryable": true,
     "backoff_seconds": 5,

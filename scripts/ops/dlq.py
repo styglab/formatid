@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from shared.postgres_url import get_checkpoint_database_url
-from services.observability.safe_record import safe_record
-from services.task_runtime.catalog import get_task_definition
-from services.task_runtime.execution_store import PostgresTaskExecutionStore
-from shared.tasking.schemas import TaskMessage
-from shared.time import iso_now
+from core.runtime.runtime_db.url import get_checkpoint_database_url
+from core.observability.safe_record import safe_record
+from core.runtime.task_runtime.catalog import get_task_definition
+from core.runtime.task_runtime.execution_store import PostgresTaskExecutionStore
+from core.runtime.task_runtime.schemas import TaskMessage
+from core.runtime.time import iso_now
 from scripts.ops.common import build_dlq_queue_name, get_redis_url
 
 
@@ -18,7 +18,7 @@ def _log_event(logger, level, event, **fields) -> None:
 
 async def inspect_dlq(queue_names: list[str], *, limit: int) -> dict:
     from redis.asyncio import Redis
-    from services.task_runtime.status_store import TaskStatusStore
+    from core.runtime.task_runtime.status_store import TaskStatusStore
 
     redis_url = get_redis_url()
     redis = Redis.from_url(redis_url, decode_responses=True)
@@ -63,7 +63,7 @@ async def requeue_dlq_messages(
     force: bool,
 ) -> dict:
     from redis.asyncio import Redis
-    from services.task_runtime.status_store import TaskStatusStore
+    from core.runtime.task_runtime.status_store import TaskStatusStore
 
     if count < 1:
         raise ValueError("count must be >= 1")

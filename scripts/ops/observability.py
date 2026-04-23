@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 
-from services.observability.retention import prune_observability
-from shared.postgres_url import get_checkpoint_database_url
+from core.observability.retention import prune_observability
+from core.runtime.runtime_db.url import get_checkpoint_database_url
 
 
 def get_observability_retention_days() -> int:

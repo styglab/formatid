@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from shared.postgres_url import get_checkpoint_database_url
+from core.runtime.runtime_db.url import get_checkpoint_database_url
 
 
 async def fetch_checkpoints(name: str | None = None) -> dict:
-    from shared.checkpoints.postgres import PostgresCheckpointStore
+    from core.runtime.runtime_db.checkpoints import PostgresCheckpointStore
 
     database_url = get_checkpoint_database_url(host_default="localhost")
     store = PostgresCheckpointStore(database_url=database_url)

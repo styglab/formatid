@@ -1,0 +1,13 @@
+{
+  "ingest.file": {
+    "queue_name": "ingest:file",
+    "capability": "ingest",
+    "kind": "file",
+    "worker_service": "ingest-file-worker",
+    "description": "Generic file download ingest queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

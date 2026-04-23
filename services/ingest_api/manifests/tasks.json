@@ -1,0 +1,14 @@
+{
+  "ingest.api.fetch": {
+    "queue": "ingest.api",
+    "module_path": "services.ingest_api.app.tasks.api",
+    "payload_schema": "services.ingest_api.app.contracts.api_fetch.ApiFetchPayload",
+    "output_schema": "services.ingest_api.app.contracts.api_fetch.ApiFetchOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

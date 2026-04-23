@@ -83,8 +83,9 @@ def enqueue_for_smoke(queue_name: str, task_name: str, payload: dict) -> dict:
     output = compose_run_python(
         "scripts/ops.py",
         "enqueue",
-        queue_name,
         task_name,
+        "--queue-name",
+        queue_name,
         "--payload",
         json.dumps(payload),
     )

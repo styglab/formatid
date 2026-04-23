@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import os
 
-from services.catalog.service_catalog import get_expected_workers
-from services.worker.runtime.health.health import build_health_report
+from core.catalog.service_catalog import get_expected_workers
+from core.runtime.worker.runtime.health.health import build_health_report
 from scripts.ops.common import get_redis_url
 
 
 async def check_workers(queue_names: list[str]) -> dict:
     from redis.asyncio import Redis
-    from services.worker.runtime.health.store import WorkerHeartbeatStore
+    from core.runtime.worker.runtime.health.store import WorkerHeartbeatStore
 
     redis_url = get_redis_url()
     heartbeat_interval = int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10"))

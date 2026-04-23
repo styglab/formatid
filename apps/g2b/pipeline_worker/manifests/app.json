@@ -1,0 +1,7 @@
+{
+  "app": "g2b.pipeline_worker",
+  "description": "G2B triggered document processing pipeline worker app",
+  "checkpoint_store": {
+    "type": "internal_postgres"
+  }
+}

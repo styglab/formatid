@@ -1,0 +1,13 @@
+{
+  "extract.text": {
+    "queue_name": "extract:text",
+    "capability": "extract",
+    "kind": "text",
+    "worker_service": "extract-text-worker",
+    "description": "Generic text extraction queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

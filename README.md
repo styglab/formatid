@@ -3,32 +3,37 @@
 이 프로젝트는 Redis 기반 generic worker runtime과 app service runtime을 분리해서 운영합니다.
 
 - Execution Layer: queue consume, retry/DLQ, heartbeat, execution history, catalog, observability
-- Pipeline Layer: reusable worker tasks (`ingest`, `extract`, `serve`)
+- Service Layer: reusable worker tasks (`ingest`, `extract`, `serve`) and platform-facing services (`runtime-api`, `runtime-dashboard`)
 - Application Layer: app-specific orchestration under `apps/*`
 
-앱별 상세 문서는 각 앱 폴더에서 관리합니다.
+앱별 상세 문서는 각 앱 컨테이너 폴더에서 관리합니다.
 
-- [G2B Ingest](apps/g2b_ingest/README.md)
-- [G2B Summary](apps/g2b_summary/README.md)
+- [G2B API](apps/g2b/api/README.md)
+- [G2B Pipeline Scheduler](apps/g2b/pipeline_scheduler/README.md)
+- [G2B Pipeline Worker](apps/g2b/pipeline_worker/README.md)
 
 ## Run
 
 ```bash
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml up -d --build
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml up -d --build
 ```
 
 종료:
 
 ```bash
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml down
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml down
 ```
 
 로그 확인:
 
 ```bash
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml logs -f api
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml logs -f ingest-api-worker
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml logs -f extract-text-worker
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f runtime-api
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f runtime-dashboard
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f g2b-api
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f g2b-pipeline-scheduler
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f g2b-pipeline-worker
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f ingest-api-worker
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml logs -f ingest-file-worker
 ```
 
 ## Services
@@ -37,40 +42,90 @@ Compose 서비스는 manifest에서 생성합니다.
 
 - `redis`: queue, heartbeat, task status, DLQ 저장
 - `postgres`: 내부 checkpoint와 runtime observability 저장
-- `api`: health/checkpoint/observability/dashboard 조회 API
-- `dashboard`: runtime 상태 모니터링 UI
+- `runtime-api`: health/checkpoint/observability/dashboard 조회 API
+- `runtime-dashboard`: runtime 상태 모니터링 UI
+- `g2b-pipeline-scheduler`: G2B scheduled ingest graph 실행
+- `g2b-pipeline-worker`: G2B triggered document graph 실행
 - `ingest-api-worker`: `ingest:api` 큐 소비
 - `ingest-file-worker`: `ingest:file` 큐 소비
-- `extract-text-worker`: `extract:text` 큐 소비
-- `serve-llm-worker`: `serve:llm` 큐 소비
-- app services: `apps/*/manifests/services/*.json`에 정의
+- app services: `apps/**/manifests/services/*.json`에 정의
+
+활성 platform service와 worker는 `apps/**/manifests/app.json`의 `requires`에서 선택합니다.
+`postgres`, `redis`, `runtime-api`, `runtime-dashboard`는 기본 platform service입니다.
+
+새 앱이나 앱 컨테이너를 만들 때는 먼저 `apps/<app>/<container>/manifests/app.json`에 필요한 실행 의존성을 선언합니다.
+
+```json
+{
+  "app": "example.pipeline",
+  "description": "Example pipeline app",
+  "requires": {
+    "workers": [
+      "ingest-api-worker",
+      "ingest-file-worker"
+    ],
+    "platform_services": [
+      "qdrant"
+    ]
+  }
+}
+```
+
+- `requires.workers`: 이 앱 때문에 compose에 포함되어야 하는 worker service 이름입니다.
+- `requires.platform_services`: 기본 platform service 외에 추가로 필요한 platform service 이름입니다.
+- 기본 platform service는 `postgres`, `redis`, `runtime-api`, `runtime-dashboard`이며 별도로 선언하지 않아도 포함됩니다.
+- `requires`를 수정한 뒤에는 `python3 scripts/generate_compose.py`와 `python3 scripts/ops.py validate-config`를 실행합니다.
+
+사용 가능한 이름은 manifest catalog에서 확인합니다.
+
+```bash
+python3 scripts/ops.py catalog
+```
+
+원본 파일 위치:
+
+- platform/runtime services: `core/**/manifests/*.json`, `services/*/manifests/*.json`
+- worker services: `services/*/manifests/workers/*.json`
 
 Manifest 원본:
 
-- `infra/platform_services/*.json`
-- `apps/*/manifests/app.json`
-- `apps/*/manifests/services/*.json`
-- `apps/*/manifests/tasks.json`
-- `services/*/manifests/*worker.json`
+- `core/**/manifests/*.json`
+- `services/*/manifests/*.json`
+- `services/*/manifests/workers/*.json`
+- `apps/**/manifests/app.json`
+- `apps/**/manifests/services/*.json`
+- `apps/**/manifests/tasks.json`
 - `services/*/manifests/tasks.json`
 
-`infra/docker-compose.yml`은 생성 파일입니다. manifest를 수정한 뒤 compose를 다시 만들려면:
+`deploy/compose/docker-compose.yml`은 생성 파일입니다. manifest를 수정한 뒤 compose를 다시 만들려면:
 
 ```bash
 python3 scripts/generate_compose.py
 ```
 
+생성 파일 drift만 확인하려면:
+
+```bash
+python3 scripts/generate_compose.py --check
+```
+
+구조 검증, boundary lint, Python compile, compose config를 한 번에 확인하려면:
+
+```bash
+python3 scripts/ops.py check-all
+```
+
 ## Environment
 
-공통 env 파일은 `infra/env` 아래에 있습니다.
+공통 env 파일은 `deploy/compose/env` 아래에 있습니다.
 
 - `compose.env`: host port와 로컬 bind mount 경로
 - `postgres.env`: 내부 compose Postgres 접속 정보
 - `worker.common.env`: worker 공통 설정
-- `infra/env/workers/*.env`: worker별 queue/env 설정
-- `api.env`: API 설정
+- `deploy/compose/env/workers/*.env`: worker별 queue/env 설정
+- `runtime_api.env`: runtime API 설정
 
-앱별 env는 `apps/<app>/infra/env`에서 관리합니다.
+앱별 env는 runnable 단위의 `apps/<app>/<api|pipeline>/infra/env`에서 관리합니다.
 
 내부 Postgres 기본값:
 
@@ -98,10 +153,10 @@ Generic worker는 app-specific 판단을 하지 않습니다. 앱 서비스가 s
 API fetch 후 Postgres ingest 테이블에 저장:
 
 ```bash
-python3 scripts/ops.py enqueue ingest:api ingest.api.fetch --payload '{
+python3 scripts/ops.py enqueue ingest.api.fetch --payload '{
   "request": {
     "method": "GET",
-    "url": "http://api:8000/health/live"
+    "url": "http://runtime-api:8000/health/live"
   },
   "target": {
     "type": "postgres",
@@ -120,7 +175,7 @@ python3 scripts/ops.py enqueue ingest:api ingest.api.fetch --payload '{
 파일 다운로드 후 S3/MinIO에 저장:
 
 ```bash
-python3 scripts/ops.py enqueue ingest:file ingest.file.download --payload '{
+python3 scripts/ops.py enqueue ingest.file.download --payload '{
   "source": {
     "url": "https://example.com/sample.pdf",
     "filename": "sample.pdf"
@@ -164,7 +219,7 @@ Task와 service 정의는 manifest를 source of truth로 사용합니다.
 - task catalog: `apps/*/manifests/tasks.json`, `services/*/manifests/tasks.json`
 - app metadata: `apps/*/manifests/app.json`
 - app service manifest: `apps/*/manifests/services/*.json`
-- worker manifest: `services/*/manifests/*worker.json`
+- worker manifest: `services/*/manifests/workers/*.json`
 
 각 task는 catalog에서 다음 정책을 가집니다.
 
@@ -187,14 +242,13 @@ worker는 자신이 담당하는 queue의 task만 실행합니다.
 
 기본 구성:
 
-- `apps/<app>/README.md`
-- `apps/<app>/service`: 앱 오케스트레이터 또는 API
-- `apps/<app>/tasks`: 앱-specific 저장소, 판단, schema, helper
-- `apps/<app>/manifests/app.json`: 앱 메타데이터와 dashboard/env 연결
-- `apps/<app>/manifests/services/<service>.json`: 앱 서비스 컨테이너 정의
-- `apps/<app>/manifests/tasks.json`: 앱 전용 worker task가 필요할 때만 사용
-- `apps/<app>/infra/env`: 앱별 env
-- `apps/<app>/infra/images`: 앱 서비스 이미지
+- `apps/<app>/api`: runnable API app
+- `apps/<app>/pipeline`: runnable pipeline app
+- `apps/<app>/<runtime>/app`: 앱 오케스트레이터, API, graph, steps
+- `apps/<app>/<runtime>/manifests/app.json`: 앱 메타데이터와 dashboard/env 연결
+- `apps/<app>/<runtime>/manifests/services/<service>.json`: 앱 서비스 컨테이너 정의
+- `apps/<app>/<runtime>/infra/env`: 앱별 env
+- `apps/<app>/<runtime>/infra/image`: 앱 서비스 이미지
 
 앱 서비스 manifest 예:
 
@@ -202,7 +256,7 @@ worker는 자신이 담당하는 queue의 task만 실행합니다.
 {
   "service_name": "example-api",
   "service_type": "api",
-  "dockerfile": "apps/example/infra/images/api/Dockerfile",
+  "dockerfile": "apps/example/infra/image/Dockerfile",
   "ports": ["8010:8000"]
 }
 ```
@@ -283,8 +337,8 @@ python3 scripts/ops.py validate-config
 수동 enqueue 예:
 
 ```bash
-python3 scripts/ops.py enqueue ingest:api ingest.api.fetch \
-  --payload '{"request":{"method":"GET","url":"http://api:8000/health/live"},"target":{"type":"postgres","schema":"public","table":"generic_api_ingest","create_table":true}}' \
+python3 scripts/ops.py enqueue ingest.api.fetch \
+  --payload '{"request":{"method":"GET","url":"http://runtime-api:8000/health/live"},"target":{"type":"postgres","schema":"public","table":"generic_api_ingest","create_table":true}}' \
   --dedupe-key manual-health-check \
   --correlation-id manual-run-001 \
   --resource-key manual-health-check
@@ -297,34 +351,39 @@ python3 scripts/ops.py enqueue ingest:api ingest.api.fetch \
 - pipeline worker는 task chaining이나 앱 상태 lifecycle을 직접 처리하지 않습니다.
 - 새 task는 manifest에 등록합니다.
 - blocking I/O는 worker task에서 피하고 가능한 async I/O를 사용합니다.
+- worker payload의 `*_env` 필드는 env var 이름만 참조합니다. secret 값 자체를 payload에 넣지 않습니다.
+- `services/*`는 앱별 env 이름을 하드코딩하지 않고, 앱이 payload/manifest로 선언한 env-name contract를 처리합니다.
 
 ## Paths
 
 ```text
-infra/
-  docker-compose.yml
-  env/
-  platform_services/
-  postgres/init/
-apps/
-  g2b_ingest/
-  g2b_summary/
-services/
-  api/
-  app_service/
+core/
+  backing/
+    postgres/init/
+    redis/
   catalog/
-  dashboard/
-  extract/
-  ingest/
-  llm/
   observability/
-  runtime_db/
-  task_runtime/
-  worker/
-shared/
-  checkpoints/
-  queue/
-  tasking/
-  postgres_url.py
-  time.py
+  runtime/
+    app_service/
+    runtime_db/
+    task_runtime/
+    worker/
+services/
+  runtime_api/
+  runtime_dashboard/
+  qdrant/
+deploy/
+  compose/
+    docker-compose.yml
+    env/
+apps/
+  g2b/
+    api/
+    pipeline_scheduler/
+    pipeline_worker/
+services/
+  extract/
+  ingest_api/
+  ingest_file/
+  llm/
 ```

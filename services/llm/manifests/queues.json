@@ -1,0 +1,13 @@
+{
+  "serve.llm": {
+    "queue_name": "serve:llm",
+    "capability": "llm",
+    "kind": "llm",
+    "worker_service": "serve-llm-worker",
+    "description": "Generic LLM generation queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}
