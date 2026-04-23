@@ -1,5 +1,10 @@
-infra/postgres/data
-infra/postgres/data/
+data/
+deploy/compose/postgres/data
+deploy/compose/postgres/data/
+deploy/compose/qdrant/storage
+deploy/compose/qdrant/storage/
+infra/qdrant/storage
+infra/qdrant/storage/
 logs/
 **/__pycache__/
 *.pyc

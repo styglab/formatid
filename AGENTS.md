@@ -15,19 +15,20 @@ Agents MUST follow this file to:
 
 ## 2. Architecture
 
-This project uses a 3-layer architecture.
+This project uses a 3-layer architecture with service subtypes.
 
 ### 1) Execution Layer
 
 Location:
 
-* `services/worker`
-* `services/task_runtime`
-* `services/runtime_db`
-* `services/catalog`
-* `services/observability`
-* `services/app_service`
-* `shared/*`
+* `core/runtime/worker`
+* `core/runtime/task_runtime`
+* `core/runtime/runtime_db`
+* `core/runtime/graph_runtime`
+* `core/catalog`
+* `core/observability`
+* `core/runtime/app_service`
+* `core/backing`
 
 Responsibilities:
 
@@ -35,6 +36,7 @@ Responsibilities:
 * retry / DLQ
 * heartbeat
 * execution state
+* graph runtime primitives
 * catalog loading
 * observability
 * reusable app-service runtime primitives
@@ -43,28 +45,61 @@ Do not modify behavior here unless explicitly asked.
 
 ---
 
-### 2) Pipeline Layer
+### 2) Service Layer
 
 Location:
 
-* `services/ingest`
+* `services/ingest_api`
+* `services/ingest_file`
 * `services/extract`
 * `services/llm`
+* `services/runtime_api`
+* `services/runtime_dashboard`
+* `services/qdrant`
 
 Responsibilities:
+
+For worker services:
 
 * external IO such as HTTP, S3, DB
 * reusable data transformation
 * stateless processing
 
+For platform-facing services:
+
+* runtime health, checkpoint, queue, and observability APIs
+* runtime dashboard UI
+* operational views over execution state
+
+For optional dependency services:
+
+* app-selected backing capabilities such as vector databases
+* service manifests only, unless reusable task code is needed
+
 Constraints:
 
 * no app-specific logic
-* no orchestration
+* no app orchestration
 * no business decision
 * no app status lifecycle management
 
-Generic pipeline task implementations belong in `services/<capability>/tasks`.
+Generic pipeline task implementations belong in `services/<capability>/app/tasks`.
+Platform-facing services belong in `services/runtime_*`.
+
+Naming policy:
+
+* `services/<capability>_<kind>` contains generic worker service code, such as `ingest_api` or `ingest_file`.
+* `services/runtime_<surface>` contains runtime-facing operational services, such as `runtime_api` or `runtime_dashboard`.
+* Compose service names use kebab-case, such as `ingest-api-worker`, `runtime-api`, and `runtime-dashboard`.
+
+Env-name config contract:
+
+* `services/*` task payloads may reference environment variable names through `*_env` fields.
+* These env names are declarative runtime config references, not secret values.
+* `services/*` MUST NOT hardcode app-specific env names.
+* `apps/*` may choose env names and inject them through app manifests and env files.
+* Secret values MUST NEVER be placed directly in task payloads.
+* App manifests that provide worker env files SHOULD declare `allowed_worker_env`.
 
 ---
 
@@ -88,7 +123,7 @@ Responsibilities:
 
 ### Rule 1 - No App Logic in services/*
 
-Forbidden in `services/*` and `shared/*`:
+Forbidden in `services/*` and `core/runtime/*`:
 
 * app names such as `g2b_ingest` or `g2b_summary`
 * business names such as `bid`, `notice`, or procurement-specific fields
@@ -97,9 +132,9 @@ Forbidden in `services/*` and `shared/*`:
 
 ---
 
-### Rule 2 - No Orchestration in Workers
+### Rule 2 - No App Orchestration in Service Workers
 
-Forbidden in `services/*`:
+Forbidden in service worker implementations:
 
 ```python
 enqueue_task(...)
@@ -108,6 +143,9 @@ if business_condition:
 ```
 
 Workers return `TaskResult`. Applications decide what happens next.
+
+Platform-facing services may read runtime state and expose operational APIs, but
+they MUST NOT decide app task flow or update app-specific lifecycle tables.
 
 ---
 
@@ -141,9 +179,61 @@ Incorrect:
 }
 ```
 
-### Rule 5 - Application Structure Policy
+### Rule 5 - Platform & Application Structure Policy
 
-1. FastAPI Application Structure
+1. Platform Structure
+formatid/
+
+├── apps/                        # entrypoints
+│   └── g2b/
+│       ├── api/                 # runnable
+│       │   ├── app/
+│       │   ├── manifests/
+│       │   └── infra/
+│       │
+│       ├── pipeline_scheduler/  # runnable
+│       └── pipeline_worker/     # runnable
+│           ├── app/
+│           ├── manifests/
+│           └── infra/
+
+├── services/                   # execution units
+│   ├── ingest_api/
+│   │   ├── app/
+│   │   │   └── tasks/
+│   │   ├── manifests/
+│   │   └── infra/
+│   │
+│   ├── ingest_file/
+│   │   ├── app/
+│   │   │   └── tasks/
+│   │   ├── manifests/
+│   │   └── infra/
+│   │
+│   ├── extract/
+│   │   ├── app/
+│   │   │   └── tasks/
+│   │   ├── manifests/
+│   │   └── infra/
+│   │
+│   └── llm/
+│       ├── app/
+│       │   └── tasks/
+│       ├── manifests/
+│       └── infra/
+
+├── core/
+│   ├── backing/               # postgres, redis
+│   ├── runtime/               # task_runtime, worker core
+│   │   └── graph_runtime/     # graph registry, runner, triggered queue
+│   ├── observability/
+│   └── catalog/
+
+├── deploy/
+└── scripts/
+
+
+2. FastAPI Application Structure
 ```
 example_api/
 ├── app/
@@ -173,13 +263,17 @@ example_api/
 └── manifests/                   # deployment manifests (K8s, etc.)
 ```
 
-2. Pipeline Application Structure
+3. Pipeline Application Structure
 ```
 example_pipeline/
 ├── app/
 │   ├── graph/
+│   │   ├── registry.py          # graph registry
 │   │   ├── ingest_graph.py      # graph definition
 │   │   └── state.py             # shared state definition
+│   │
+│   ├── contracts/               # graph state and node/step IO contracts
+│   │   └── ingest.py
 │   │
 │   ├── nodes/                   # node wrappers (execution boundary)
 │   │   └── ingest_nodes.py
@@ -191,7 +285,8 @@ example_pipeline/
 │   │   └── types.py             # TypedDict / domain types
 │   │
 │   ├── service/
-│   │   └── run_pipeline.py      # pipeline entrypoint
+│   │   ├── run_scheduler.py     # scheduled graph runner entrypoint
+│   │   └── run_worker.py        # triggered graph worker entrypoint
 │   │
 │   └── config.py
 │
@@ -250,6 +345,25 @@ Redis queue names use colon-separated capability/type:
 
 Graph node names and graph state keys use `snake_case`.
 
+### Graph Trigger Names
+
+Graph triggers use these names:
+
+* `scheduled`: schedule-based graph start
+* `triggered`: queue-request-based graph start
+
+Reusable graph runtime primitives belong in `core/runtime/graph_runtime`.
+Graphs MUST NOT depend on trigger implementations. Trigger runners select a
+registered graph and pass declarative params through `GraphRunContext`.
+Use `create_graph_definition` for app graph registration so apps only provide
+graph builders, optional step builders, and initial state.
+
+### Payload / Output Contracts
+
+Reusable service task payload/output contracts belong in `services/<service>/app/contracts`.
+App graph state and app-specific node/step contracts belong in `apps/<app>/app/contracts`.
+Runtime protocols such as `TaskMessage`, `TaskResult`, and `GraphRunContext` remain in `core/runtime/*`.
+
 ---
 
 ## 6. Where to Put Code
@@ -262,11 +376,15 @@ Use `apps/<app>/tasks` or `apps/<app>/service`.
 
 ### Q2. Is this reusable IO / processing?
 
-Use `services/ingest`, `services/extract`, or `services/llm`.
+Use `services/ingest_api`, `services/ingest_file`, `services/extract`, or `services/llm`.
 
-### Q3. Is this runtime concern?
+### Q3. Is this operational API or dashboard over runtime state?
 
-Use `services/task_runtime`, `services/worker`, `services/app_service`, `services/runtime_db`, `services/catalog`, or `shared/*`.
+Use `services/runtime_api` or `services/runtime_dashboard`.
+
+### Q4. Is this runtime concern?
+
+Use `core/runtime/task_runtime`, `core/runtime/worker`, `core/runtime/app_service`, `core/runtime/graph_runtime`, `core/runtime/runtime_db`, `core/catalog`, `core/observability`, or `core/backing`.
 
 ---
 
@@ -275,6 +393,7 @@ Use `services/task_runtime`, `services/worker`, `services/app_service`, `service
 * Do not hardcode task routing.
 * All tasks must be registered in manifest.
 * Worker/task mapping must come from manifest.
+* Platform-facing service definitions must come from manifest.
 * App metadata lives in `apps/<app>/manifests/app.json`.
 
 ---
@@ -284,7 +403,7 @@ Use `services/task_runtime`, `services/worker`, `services/app_service`, `service
 ### Run services
 
 ```bash
-docker compose --env-file infra/env/compose.env -f infra/docker-compose.yml up -d --build
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml up -d --build
 ```
 
 ### Re-generate compose
@@ -299,10 +418,22 @@ python3 scripts/generate_compose.py
 python3 scripts/ops.py validate-config
 ```
 
+### Check all
+
+```bash
+python3 scripts/ops.py check-all
+```
+
+### Boundary lint
+
+```bash
+python3 scripts/ops.py lint-boundaries
+```
+
 ### Enqueue task example
 
 ```bash
-python3 scripts/ops.py enqueue ingest:api ingest.api.fetch --payload '{...}'
+python3 scripts/ops.py enqueue ingest.api.fetch --payload '{...}'
 ```
 
 ---
@@ -345,8 +476,11 @@ apps/<app>/tasks/*
 
 Before finishing any change:
 
-* [ ] No app logic in `services/*` or `shared/*`
-* [ ] No orchestration in pipeline workers
+* [ ] No app logic in `services/*` or `core/runtime/*`
+* [ ] No app orchestration in service workers
+* [ ] Platform-facing services only expose runtime operations
+* [ ] Secret values are not placed in task payloads
+* [ ] `services/*` does not hardcode app-specific env names
 * [ ] Correct layer placement
 * [ ] Manifest updated
 * [ ] Naming convention followed
@@ -358,7 +492,7 @@ Before finishing any change:
 This project is:
 
 ```txt
-Execution Engine + Pipeline Workers + App Orchestrators
+Execution Core + Services + App Orchestrators
 ```
 
 ---

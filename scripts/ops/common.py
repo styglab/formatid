@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-COMPOSE_FILE = PROJECT_ROOT / "infra" / "docker-compose.yml"
-COMPOSE_ENV_FILE = PROJECT_ROOT / "infra" / "env" / "compose.env"
+COMPOSE_FILE = PROJECT_ROOT / "deploy" / "compose" / "docker-compose.yml"
+COMPOSE_ENV_FILE = PROJECT_ROOT / "deploy" / "compose" / "env" / "compose.env"
 POLL_TIMEOUT_SECONDS = 30
 POLL_INTERVAL_SECONDS = 1
 

@@ -1,9 +1,8 @@
 {
   "serve.llm.generate": {
-    "service_name": "serve-llm-worker",
-    "queue_name": "serve:llm",
-    "module_path": "services.llm.tasks.llm",
-    "payload_schema": "services.llm.tasks.schemas.LlmGenerateStorePayload",
+    "queue": "serve.llm",
+    "module_path": "services.llm.app.tasks.llm",
+    "payload_schema": "services.llm.app.tasks.schemas.LlmGenerateStorePayload",
     "max_retries": 3,
     "retryable": true,
     "backoff_seconds": 5,

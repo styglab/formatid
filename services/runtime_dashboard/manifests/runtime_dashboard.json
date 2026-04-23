@@ -1,0 +1,12 @@
+{
+  "service_name": "runtime-dashboard",
+  "dockerfile": "services/runtime_dashboard/infra/image/Dockerfile",
+  "build_context": "../..",
+  "restart": "unless-stopped",
+  "ports": [
+    "${DASHBOARD_HOST_PORT:-8080}:${DASHBOARD_CONTAINER_PORT:-80}"
+  ],
+  "depends_on_service_healthy": [
+    "runtime-api"
+  ]
+}

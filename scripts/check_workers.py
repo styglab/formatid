@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 from ops_lib import check_workers, print_json
-from services.catalog.service_catalog import list_worker_queue_names
+from core.catalog.service_catalog import list_worker_queue_names
 
 DEFAULT_QUEUES = list(list_worker_queue_names())
 

@@ -1,0 +1,11 @@
+{
+  "service_name": "ingest-file-worker",
+  "queue": "ingest.file",
+  "dockerfile": "services/ingest_file/infra/image/Dockerfile",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "deploy/compose/env/worker.common.env",
+    "deploy/compose/env/workers/worker.ingest_file.env"
+  ],
+  "replicas": 1
+}

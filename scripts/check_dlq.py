@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 from ops_lib import inspect_dlq, print_json
-from services.task_runtime.catalog import list_queue_names
+from core.runtime.task_runtime.catalog import list_queue_names
 
 
 def parse_args() -> argparse.Namespace:

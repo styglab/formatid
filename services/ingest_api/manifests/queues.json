@@ -1,0 +1,13 @@
+{
+  "ingest.api": {
+    "queue_name": "ingest:api",
+    "capability": "ingest",
+    "kind": "api",
+    "worker_service": "ingest-api-worker",
+    "description": "Generic HTTP/API ingest queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}
