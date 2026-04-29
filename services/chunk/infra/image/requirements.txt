@@ -1,0 +1,4 @@
+psycopg[binary]
+redis
+pydantic
+minio

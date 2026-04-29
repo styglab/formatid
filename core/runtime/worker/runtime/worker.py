@@ -44,6 +44,7 @@ from core.runtime.task_runtime.registry import registry
 from core.runtime.task_runtime.routing import validate_task_route
 from core.runtime.task_runtime.status_store import TaskStatusStore
 from core.runtime.task_runtime.validation import validate_task_payload
+from core.runtime.graph_runtime import GraphRunStore, enqueue_graph_resumes_for_task
 from core.runtime.time import now
 from core.runtime.worker.runtime.health.store import WorkerHeartbeatStore
 
@@ -278,6 +279,7 @@ async def _process_message(
     allowed_task_names: set[str],
     status_store: TaskStatusStore,
     execution_store: PostgresTaskExecutionStore,
+    graph_run_store: GraphRunStore,
     raise_on_error: bool,
 ) -> None:
     try:
@@ -312,6 +314,7 @@ async def _process_message(
             status_document=status_document,
             worker_id=worker_id,
         )
+        await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
         context = TaskContext(
             message=message,
             service_name=task_policy.service_name,
@@ -337,6 +340,7 @@ async def _process_message(
             status_document=status_document,
             worker_id=worker_id,
         )
+        await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
     except asyncio.CancelledError as exc:
         task_policy = get_task_policy(message.task_name)
         error_payload = _build_error_payload(exc)
@@ -363,6 +367,7 @@ async def _process_message(
             status_document=status_document,
             worker_id=worker_id,
         )
+        await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
         return
     except Exception as exc:
         task_policy = get_task_policy(message.task_name)
@@ -402,6 +407,7 @@ async def _process_message(
                 status_document=status_document,
                 worker_id=worker_id,
             )
+            await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
         elif decision.action == "dead_letter":
             dlq_message = clone_message_for_requeue(message=message, attempts=decision.terminal_attempts)
             dlq_queue_name = build_dlq_queue_name(queue_name=message.queue_name)
@@ -433,6 +439,7 @@ async def _process_message(
                 status_document=status_document,
                 worker_id=worker_id,
             )
+            await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
         else:
             log_event(
                 logger,
@@ -458,6 +465,7 @@ async def _process_message(
                 status_document=status_document,
                 worker_id=worker_id,
             )
+            await _enqueue_graph_resumes(status_document=status_document, graph_run_store=graph_run_store, worker_id=worker_id)
         log_event(
             logger,
             logging.ERROR,
@@ -475,12 +483,39 @@ async def _process_message(
             raise
 
 
+async def _enqueue_graph_resumes(*, status_document: dict, graph_run_store: GraphRunStore, worker_id: str) -> None:
+    status = str(status_document.get("status") or "")
+    if status not in {"succeeded", "failed", "interrupted", "dead_lettered"}:
+        return
+    task_id = status_document.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return
+    resume_count = await enqueue_graph_resumes_for_task(
+        redis_url=get_settings().redis_url,
+        graph_run_store=graph_run_store,
+        task_id=task_id,
+        resume_value={"task_id": task_id, "status": status},
+        requested_by=f"worker:{worker_id}",
+    )
+    if resume_count:
+        log_event(
+            logger,
+            logging.INFO,
+            "task_graph_resumes_enqueued",
+            worker_id=worker_id,
+            task_id=task_id,
+            status=status,
+            resume_count=resume_count,
+        )
+
+
 async def run_worker(*, once: bool) -> None:
     settings = get_settings()
     queue = build_queue()
     heartbeat_store = build_heartbeat_store()
     status_store = build_status_store()
     execution_store = build_execution_store()
+    graph_run_store = GraphRunStore(database_url=get_checkpoint_database_url(host_default="postgres"))
     shutdown_event = asyncio.Event()
     allowed_task_names = set(list_task_names_for_queue(settings.worker_queue_name))
 
@@ -575,6 +610,7 @@ async def run_worker(*, once: bool) -> None:
                     allowed_task_names=allowed_task_names,
                     status_store=status_store,
                     execution_store=execution_store,
+                    graph_run_store=graph_run_store,
                     raise_on_error=once,
                 )
             )
@@ -642,6 +678,7 @@ async def run_worker(*, once: bool) -> None:
         )
         await status_store.close()
         await execution_store.close()
+        await graph_run_store.close()
         await heartbeat_store.close()
         await queue.close()
 

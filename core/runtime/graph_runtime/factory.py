@@ -24,9 +24,24 @@ def create_graph_definition(
     description: str = "",
 ) -> GraphDefinition:
     async def run(context: GraphRunContext) -> dict[str, Any]:
-        graph = _build_graph(build_graph=build_graph, build_steps=build_steps)
+        graph = _build_graph(
+            build_graph=build_graph,
+            build_steps=build_steps,
+            checkpointer=context.graph_checkpointer,
+        )
+        config = None
+        if context.graph_checkpointer is not None:
+            config = {"configurable": {"thread_id": context.thread_id or context.run_id}}
+        if context.resume_value is not None:
+            if context.graph_checkpointer is None:
+                raise RuntimeError("Graph resume requires a configured graph checkpointer")
+            from langgraph.types import Command
+
+            return await graph.ainvoke(Command(resume=context.resume_value), config=config)
         state = _build_initial_state(context=context, initial_state=initial_state)
-        return await graph.ainvoke(state)
+        if config is None:
+            return await graph.ainvoke(state)
+        return await graph.ainvoke(state, config=config)
 
     return GraphDefinition(name=name, description=description, run=run)
 
@@ -35,10 +50,18 @@ def _build_graph(
     *,
     build_graph: BuildGraph[StepsT],
     build_steps: BuildSteps[StepsT] | None,
+    checkpointer: Any | None = None,
 ) -> CompiledGraph:
+    parameters = signature(build_graph).parameters
+    supports_checkpointer = "checkpointer" in parameters
     if build_steps is None:
+        if supports_checkpointer:
+            return build_graph(checkpointer=checkpointer)
         return build_graph()
-    return build_graph(build_steps())
+    steps = build_steps()
+    if supports_checkpointer:
+        return build_graph(steps, checkpointer=checkpointer)
+    return build_graph(steps)
 
 
 def _build_initial_state(
@@ -51,6 +74,12 @@ def _build_initial_state(
         "run_store": context.run_store,
         "graph_run_store": context.graph_run_store,
         "graph_run_id": context.run_id,
+        "thread_id": context.thread_id or context.run_id,
+        "request_id": context.request_id,
+        "correlation_id": context.correlation_id,
+        "resource_key": context.resource_key,
+        "session_id": context.session_id,
+        "execution_identity": context.execution_identity,
         "params": context.params,
     }
     if initial_state is None:

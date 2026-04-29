@@ -1,0 +1,22 @@
+{
+  "service_name": "spec-rag-workflow",
+  "service_type": "consumer",
+  "dockerfile": "apps/spec_rag/workflow/infra/image/Dockerfile",
+  "command": [
+    "python",
+    "-m",
+    "apps.spec_rag.workflow.app.service.run_worker"
+  ],
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "apps/spec_rag/workflow/infra/env/app.env"
+  ],
+  "depends_on_service_healthy": [
+    "embedding",
+    "postgres",
+    "redis"
+  ]
+}

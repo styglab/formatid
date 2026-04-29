@@ -1,0 +1,13 @@
+{
+  "index.sparse": {
+    "queue_name": "index:sparse",
+    "capability": "index",
+    "kind": "sparse",
+    "worker_service": "index-sparse-worker",
+    "description": "Generic BM25 sparse indexing queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

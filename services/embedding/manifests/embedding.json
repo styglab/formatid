@@ -1,0 +1,22 @@
+{
+  "service_name": "embedding",
+  "service_type": "model_api",
+  "dockerfile": "services/embedding/infra/image/Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "ports": [
+    "${EMBEDDING_HOST_PORT:-8020}:8000"
+  ],
+  "healthcheck": {
+    "test": [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"
+    ],
+    "interval": "5s",
+    "timeout": "3s",
+    "retries": 10
+  }
+}

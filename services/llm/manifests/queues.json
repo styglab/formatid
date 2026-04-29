@@ -1,9 +1,9 @@
 {
-  "serve.llm": {
-    "queue_name": "serve:llm",
+  "llm.text": {
+    "queue_name": "llm:text",
     "capability": "llm",
-    "kind": "llm",
-    "worker_service": "serve-llm-worker",
+    "kind": "text",
+    "worker_service": "llm-gateway-worker",
     "description": "Generic LLM generation queue",
     "policies": {
       "pause_supported": true,

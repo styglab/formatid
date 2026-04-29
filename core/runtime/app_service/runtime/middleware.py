@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from core.observability.correlation import build_correlation_details
 from core.observability.log_store import ServiceLogStore
 from core.runtime.app_service.runtime.stores import ServiceEventStore, ServiceRequestStore
 
@@ -34,6 +35,8 @@ class ServiceRequestMiddleware(BaseHTTPMiddleware):
 
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         correlation_id = request.headers.get("x-correlation-id") or request_id
+        request.state.request_id = request_id
+        request.state.correlation_id = correlation_id
         started_at = time.perf_counter()
         try:
             response = await call_next(request)
@@ -60,6 +63,7 @@ class ServiceRequestMiddleware(BaseHTTPMiddleware):
             result={"status_code": response.status_code},
         )
         response.headers["x-request-id"] = request_id
+        response.headers["x-correlation-id"] = correlation_id
         return response
 
     async def _safe_record(
@@ -91,12 +95,17 @@ class ServiceRequestMiddleware(BaseHTTPMiddleware):
                 details.update(result)
             if error is not None:
                 details["error_type"] = error.get("type")
+            correlated_details = build_correlation_details(
+                details=details,
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
             await self._events.record(
                 service_name=self._service_name,
                 event_name=f"api.request.{status}",
                 request_id=request_id,
                 correlation_id=correlation_id,
-                details=details,
+                details=correlated_details,
             )
             await self._logs.record(
                 service_name=self._service_name,
@@ -105,7 +114,11 @@ class ServiceRequestMiddleware(BaseHTTPMiddleware):
                 message=f"{request.method} {request.url.path} {status}",
                 request_id=request_id,
                 correlation_id=correlation_id,
-                details={**details, "duration_ms": duration_ms},
+                details=build_correlation_details(
+                    details={**details, "duration_ms": duration_ms},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ),
             )
         except Exception:
             return

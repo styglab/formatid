@@ -50,8 +50,8 @@ Compose 서비스는 manifest에서 생성합니다.
 - `ingest-file-worker`: `ingest:file` 큐 소비
 - app services: `apps/**/manifests/services/*.json`에 정의
 
-활성 platform service와 worker는 `apps/**/manifests/app.json`의 `requires`에서 선택합니다.
-`postgres`, `redis`, `runtime-api`, `runtime-dashboard`는 기본 platform service입니다.
+활성 worker는 `apps/**/manifests/app.json`의 `requires`에서 선택합니다.
+기본 platform service는 항상 포함됩니다.
 
 새 앱이나 앱 컨테이너를 만들 때는 먼저 `apps/<app>/<container>/manifests/app.json`에 필요한 실행 의존성을 선언합니다.
 
@@ -73,7 +73,8 @@ Compose 서비스는 manifest에서 생성합니다.
 
 - `requires.workers`: 이 앱 때문에 compose에 포함되어야 하는 worker service 이름입니다.
 - `requires.platform_services`: 기본 platform service 외에 추가로 필요한 platform service 이름입니다.
-- 기본 platform service는 `postgres`, `redis`, `runtime-api`, `runtime-dashboard`이며 별도로 선언하지 않아도 포함됩니다.
+- 기본 platform service는 `postgres`, `redis`, `runtime-api`, `runtime-dashboard`, `prefect-postgres`, `prefect-redis`, `prefect-server`, `prefect-services`이며 별도로 선언하지 않아도 포함됩니다.
+- Prefect는 플랫폼 공용 control plane입니다. 앱은 Prefect stack을 다시 선언하지 않고, 필요한 경우 `apps/<app>/pipeline`에 app-specific pipeline worker만 추가합니다.
 - `requires`를 수정한 뒤에는 `python3 scripts/generate_compose.py`와 `python3 scripts/ops.py validate-config`를 실행합니다.
 
 사용 가능한 이름은 manifest catalog에서 확인합니다.
@@ -109,11 +110,27 @@ python3 scripts/generate_compose.py
 python3 scripts/generate_compose.py --check
 ```
 
-구조 검증, boundary lint, Python compile, compose config를 한 번에 확인하려면:
+구조 검증, boundary lint, unit tests, Python compile, compose config를 한 번에 확인하려면:
 
 ```bash
 python3 scripts/ops.py check-all
 ```
+
+표준 라이브러리 기반 unit test만 따로 실행하려면:
+
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+`validate-config`는 manifest 관계뿐 아니라 플랫폼 naming/schema contract도 검사합니다.
+
+- task name: dot-separated lowercase, 최소 `<layer>.<capability>.<action>`
+- queue id: dot-separated lowercase
+- Redis queue name: colon-separated lowercase, queue id와 segment 일치
+- service name: kebab-case
+- task module/schema path: 유효한 Python module/class path
+- service command/env/ports/volumes/dependencies: string list shape
+- healthcheck: non-empty test, `retries >= 1`
 
 ## Environment
 
@@ -147,8 +164,11 @@ Generic worker는 app-specific 판단을 하지 않습니다. 앱 서비스가 s
 
 - `ingest.api.fetch -> ingest:api`
 - `ingest.file.download -> ingest:file`
+- `chunk.document.run -> chunk:document`
 - `extract.text.run -> extract:text`
-- `serve.llm.generate -> serve:llm`
+- `llm.text.generate -> llm:text`
+- `index.dense.upsert -> index:dense`
+- `index.sparse.upsert -> index:sparse`
 
 API fetch 후 Postgres ingest 테이블에 저장:
 
@@ -193,6 +213,115 @@ python3 scripts/ops.py enqueue ingest.file.download --payload '{
 }'
 ```
 
+## Demo Agent Runtime
+
+`apps/demo/agent_api`와 `apps/demo/agent_worker`는 플랫폼 위에서
+agent workflow를 운영하는 최소 예제입니다.
+
+흐름:
+
+```text
+demo-agent-api
+  -> triggered graph queue
+  -> demo-agent-worker
+  -> agent_service_graph
+  -> demo-agent-tool-worker
+  -> graph resume
+```
+
+예제 실행:
+
+```bash
+curl -sS -X POST http://localhost:8011/api/v1/agent/runs \
+  -H 'content-type: application/json' \
+  -H 'x-correlation-id: manual-agent-001' \
+  -d '{"message":"hello agent"}'
+```
+
+이 예제는 triggered graph, tool task 분리, suspend/resume, execution identity
+전파를 검증하기 위한 것입니다. 프로덕션 agent 운영에는 LLM planner, durable
+memory, artifact store, tool governance, agent-specific dashboard가 추가로
+필요합니다.
+
+## Spec RAG App
+
+`apps/spec_rag`는 업로드된 문서를 RAG index workflow로 처리해 원본 저장,
+문서 파싱, 청킹, dense vector indexing, BM25 sparse indexing을 수행하는 앱입니다.
+
+구성:
+
+- `apps/spec_rag/api`: 파일 업로드와 run 조회 API
+- `apps/spec_rag/workflow/app/graph/indexing.py`: `spec_indexing_graph`
+- `apps/spec_rag/workflow/app/graph/query.py`: `spec_query_graph`
+- `services/parser`: `parse.document.run`
+- `services/chunk`: `chunk.document.run`
+- `services/embedding`: FastAPI `/v1/embeddings`, used by `index_dense`
+- `services/index_dense`: `index.dense.upsert`, embedding 생성과 외부 Qdrant upsert 수행
+- `services/index_sparse`: `index.sparse.upsert`, OpenSearch BM25 indexing 수행
+
+`spec_rag`는 compose 내부 MinIO/Qdrant/OpenSearch 컨테이너를 띄우지 않습니다.
+외부 MinIO/S3 endpoint는 `apps/spec_rag/workflow/infra/env/app.env`의 `S3_*` 값으로 지정합니다.
+외부 Qdrant endpoint는 `apps/spec_rag/workflow/infra/env/app.env`의
+`SPEC_RAG_VECTOR_DB_ENDPOINT`로 지정합니다. Qdrant 인증을 사용하는 경우
+indexing/upsert는 `QDRANT_API_KEY`, query/retrieval은 `QDRANT_READONLY_API_KEY`를
+사용합니다. 외부 OpenSearch endpoint는 같은 파일의 `OPENSEARCH_ENDPOINT` 값으로 지정합니다.
+
+흐름:
+
+```text
+POST /api/v1/spec-rag
+  -> spec-rag-api stores uploaded file in MinIO
+  -> spec-rag-workflow starts spec_indexing_graph
+  -> document-parser-worker stores parsed text in MinIO
+  -> document-chunk-worker
+  -> fan out:
+     -> index-dense-worker calls embedding service and upserts chunk vectors
+     -> index-sparse-worker upserts chunk documents for BM25
+  -> GET /api/v1/spec-rag/{run_id}
+```
+
+예시:
+
+```bash
+curl -sS -X POST http://localhost:8012/api/v1/spec-rag \
+  -H 'x-correlation-id: manual-spec-rag-001' \
+  -F 'file=@./sample.txt'
+```
+
+## Data Pipeline App
+
+`apps/shared/data_pipeline`은 공용 Prefect 기반 데이터 파이프라인 앱입니다.
+LangGraph 기반 app `workflow`는 request/job orchestration을 담당하고, Prefect
+`pipeline`은 배치성 데이터 파이프라인이나 운영성 healthcheck flow 같은 독립
+ETL 작업에 사용합니다.
+
+Prefect self-hosted stack은 `services/prefect` manifest로 기본 platform service에
+포함됩니다. UI는 `http://localhost:4200`에서 확인할 수 있습니다.
+다른 앱이 Prefect를 사용할 때도 Prefect server/Postgres/Redis를 새로 띄우지
+않고, 공용 pipeline worker 또는 앱별 pipeline worker와 work pool만 추가합니다.
+
+예시 flow 실행:
+
+```bash
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml exec -T shared-data-pipeline-worker python -m apps.shared.data_pipeline.app.flows.healthcheck
+```
+
+`spec-rag-indexing/hourly` deployment는 `shared-data-pipeline-worker` 시작 시
+`apps/shared/data_pipeline/app/deployments.py`에서 자동 등록됩니다. 이 flow는 매시 정각(`0 * * * *`, `Asia/Seoul`)에
+`spec_rag.documents`의 업로드 문서를 읽고 `spec_indexing_graph`를
+`spec-rag:index` queue에 enqueue합니다. 실제 parse, chunk, dense/sparse index
+작업은 기존 `spec-rag-workflow`와 worker들이 수행합니다.
+
+`data-pipeline-healthcheck/every-5-minutes` deployment도 같은 파일에서 자동
+등록됩니다. 이 flow는 5분마다(`*/5 * * * *`, `Asia/Seoul`) `runtime-api`와
+Prefect API health를 확인합니다.
+
+등록 상태 확인:
+
+```bash
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml exec -T shared-data-pipeline-worker prefect deployment inspect spec-rag-indexing/hourly
+```
+
 ## App Service Runtime
 
 App service runtime은 실행 방식에 종속되지 않는 공통 lifecycle만 제공합니다.
@@ -211,6 +340,26 @@ App service runtime은 실행 방식에 종속되지 않는 공통 lifecycle만 
 - `api`: HTTP/SSE API 서비스
 - `consumer`: queue/stream consumer 서비스
 - `service`: 아직 타입을 세분화하지 않은 일반 앱 서비스
+
+## Execution Identity
+
+플랫폼은 API, graph, worker, log를 같은 identity로 추적합니다.
+
+- `request_id`: API request identity
+- `correlation_id`: API, graph, worker, log를 잇는 cross-surface trace identity
+- `run_id`: graph run identity
+- `thread_id`: LangGraph thread identity, `run_id`와 동일해야 함
+- `task_id`: worker task identity
+- `resource_key`: 같은 대상 리소스의 작업을 묶는 app/resource identity
+- `session_id`: agent/conversation 같은 장기 세션 identity
+
+전파 규칙:
+
+- API middleware는 `x-request-id`, `x-correlation-id`를 읽거나 생성하고 응답 헤더로 반환합니다.
+- triggered graph 요청은 `request_id`, `correlation_id`, `resource_key`, `session_id`를 전달할 수 있습니다.
+- graph runtime은 `params.__runtime.identity`에 정규화된 identity를 저장하고 graph state에 `execution_identity`를 주입합니다.
+- graph가 worker task를 enqueue할 때는 기존 `correlation_id`와 `resource_key`를 전달해야 합니다.
+- suspended graph resume 요청은 원 graph run의 identity를 이어받아야 합니다.
 
 ## Catalog
 
@@ -272,7 +421,7 @@ python3 -c 'import json; from scripts.ops.validation import validate_config; pri
 
 Redis에 저장되는 데이터:
 
-- queue: `ingest:api`, `ingest:file`, `extract:text`, `serve:llm`
+- queue: `ingest:api`, `ingest:file`, `extract:text`, `llm:text`, `index:dense`, `index:sparse`
 - DLQ: `<queue_name>:dlq`
 - worker heartbeat: `worker:heartbeat:<queue_name>:<worker_id>`
 - app service heartbeat: `service:heartbeat:<service_id>`
@@ -371,7 +520,8 @@ core/
 services/
   runtime_api/
   runtime_dashboard/
-  qdrant/
+  index_dense/
+  index_sparse/
 deploy/
   compose/
     docker-compose.yml

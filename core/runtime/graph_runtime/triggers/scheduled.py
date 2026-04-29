@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from core.runtime.app_service.runtime.core import AppServiceRuntime
 from core.runtime.app_service.runtime.run_store import ServiceRunStore
+from core.runtime.graph_runtime.checkpointer import AsyncGraphCheckpointer
 from core.runtime.graph_runtime.registry import GraphRegistry
 from core.runtime.graph_runtime.runner import GraphResultDetails, run_registered_graph
 from core.runtime.runtime_db.checkpoints import PostgresCheckpointStore
@@ -20,6 +21,8 @@ def add_scheduled_graph_job(
     runtime: AppServiceRuntime,
     checkpoint_store: PostgresCheckpointStore,
     run_store: ServiceRunStore,
+    graph_checkpointer: AsyncGraphCheckpointer | None,
+    resume_queue_name: str | None,
     graph_name: str,
     run_name: str,
     schedule: str,
@@ -41,6 +44,8 @@ def add_scheduled_graph_job(
             "runtime": runtime,
             "checkpoint_store": checkpoint_store,
             "run_store": run_store,
+            "graph_checkpointer": graph_checkpointer,
+            "resume_queue_name": resume_queue_name,
             "graph_name": graph_name,
             "run_name": run_name,
             "trigger_config": {
@@ -69,6 +74,8 @@ async def _run_scheduled_graph(
     runtime: AppServiceRuntime,
     checkpoint_store: PostgresCheckpointStore,
     run_store: ServiceRunStore,
+    graph_checkpointer: AsyncGraphCheckpointer | None,
+    resume_queue_name: str | None,
     graph_name: str,
     run_name: str,
     trigger_config: dict[str, Any],
@@ -83,6 +90,8 @@ async def _run_scheduled_graph(
         trigger="scheduled",
         checkpoint_store=checkpoint_store,
         run_store=run_store,
+        graph_checkpointer=graph_checkpointer,
+        resume_queue_name=resume_queue_name,
         run_name=run_name,
         trigger_config=trigger_config,
         lock_enabled=lock_enabled,

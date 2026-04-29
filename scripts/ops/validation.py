@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 from core.catalog.registry import CatalogRegistry
@@ -15,6 +16,11 @@ from scripts.ops.common import COMPOSE_FILE, PROJECT_ROOT
 
 APP_SERVICE_TYPES = {"cron", "api", "consumer", "service"}
 APPS_DIR = PROJECT_ROOT / "apps"
+DOT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+QUEUE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)+$")
+SERVICE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+MODULE_PATH_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
+SCHEMA_PATH_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 
 
 def validate_config() -> dict:
@@ -23,7 +29,15 @@ def validate_config() -> dict:
     errors: list[str] = []
     warnings: list[str] = []
 
-    registry = CatalogRegistry.load()
+    try:
+        registry = CatalogRegistry.load()
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        return {
+            "valid": False,
+            "errors": [f"catalog load failed: {exc}"],
+            "warnings": warnings,
+            "summary": {},
+        }
     task_definitions = registry.tasks
     service_definitions = registry.active_worker_services
     available_service_definitions = registry.available_worker_services
@@ -43,6 +57,16 @@ def validate_config() -> dict:
     }
     required_platform_service_names = set(registry.required_platform_services)
     required_worker_names = set(registry.required_workers)
+
+    _validate_catalog_schema(
+        errors=errors,
+        warnings=warnings,
+        task_definitions=task_definitions,
+        queue_definitions=queue_definitions,
+        available_service_definitions=available_service_definitions,
+        available_platform_service_definitions=available_platform_service_definitions,
+        app_service_definitions=app_service_definitions,
+    )
 
     for definition in queue_definitions:
         if definition.worker_service not in available_service_names:
@@ -330,6 +354,103 @@ def validate_config() -> dict:
     }
 
 
+def _validate_catalog_schema(
+    *,
+    errors: list[str],
+    warnings: list[str],
+    task_definitions: tuple[object, ...],
+    queue_definitions: tuple[object, ...],
+    available_service_definitions: tuple[object, ...],
+    available_platform_service_definitions: tuple[object, ...],
+    app_service_definitions: tuple[object, ...],
+) -> None:
+    for definition in queue_definitions:
+        queue = getattr(definition, "queue", "")
+        queue_name = getattr(definition, "queue_name", "")
+        capability = getattr(definition, "capability", "")
+        kind = getattr(definition, "kind", "")
+        worker_service = getattr(definition, "worker_service", "")
+        if not _matches(DOT_ID_PATTERN, queue):
+            errors.append(f"queue id must be dot-separated lowercase segments: queue={queue}")
+        if not _matches(QUEUE_NAME_PATTERN, queue_name):
+            errors.append(f"queue_name must be colon-separated lowercase segments: queue={queue} queue_name={queue_name}")
+        if ":" in queue_name and queue_name.replace(":", ".") != queue:
+            errors.append(
+                f"queue id must match queue_name segments: queue={queue} queue_name={queue_name}"
+            )
+        if not _is_lower_identifier(capability):
+            errors.append(f"queue capability must be a lowercase identifier: queue={queue} capability={capability}")
+        if not _is_lower_identifier(kind):
+            errors.append(f"queue kind must be a lowercase identifier: queue={queue} kind={kind}")
+        if not _matches(SERVICE_NAME_PATTERN, worker_service):
+            errors.append(f"queue worker_service must be kebab-case: queue={queue} worker_service={worker_service}")
+
+    for definition in task_definitions:
+        task_name = getattr(definition, "task_name", "")
+        module_path = getattr(definition, "module_path", "")
+        queue = getattr(definition, "queue", "")
+        if not _matches(DOT_ID_PATTERN, task_name):
+            errors.append(f"task_name must be dot-separated lowercase segments: task_name={task_name}")
+        elif len(task_name.split(".")) < 3:
+            errors.append(f"task_name must include at least layer.capability.action: task_name={task_name}")
+        if not _matches(MODULE_PATH_PATTERN, module_path):
+            errors.append(f"task module_path must be a valid Python module path: task_name={task_name} module_path={module_path}")
+        if not _matches(DOT_ID_PATTERN, queue):
+            errors.append(f"task queue must be a dot-separated queue id: task_name={task_name} queue={queue}")
+        for schema_field in ("payload_schema", "output_schema"):
+            schema_path = getattr(definition, schema_field, None)
+            if schema_path is not None and not _matches(SCHEMA_PATH_PATTERN, schema_path):
+                errors.append(
+                    f"task {schema_field} must be a valid Python class path: task_name={task_name} {schema_field}={schema_path}"
+                )
+        for int_field in ("max_retries", "backoff_seconds", "timeout_seconds", "dlq_requeue_limit"):
+            value = getattr(definition, int_field, None)
+            if value is not None and not isinstance(value, int):
+                errors.append(f"task {int_field} must be an integer: task_name={task_name}")
+        for bool_field in ("retryable", "dlq_enabled", "dlq_requeue_keep_attempts"):
+            value = getattr(definition, bool_field, None)
+            if not isinstance(value, bool):
+                errors.append(f"task {bool_field} must be boolean: task_name={task_name}")
+
+    for definition in (*available_service_definitions, *available_platform_service_definitions, *app_service_definitions):
+        service_name = getattr(definition, "service_name", "")
+        service_type = getattr(definition, "service_type", None)
+        if not _matches(SERVICE_NAME_PATTERN, service_name):
+            errors.append(f"service_name must be kebab-case: service_name={service_name}")
+        if service_type is not None and not _is_lower_identifier(service_type):
+            errors.append(f"service_type must be a lowercase identifier: service_name={service_name} service_type={service_type}")
+        _validate_string_tuple(errors, service_name, "command", getattr(definition, "command", ()))
+        _validate_string_tuple(errors, service_name, "env_files", getattr(definition, "env_files", ()))
+        _validate_string_tuple(errors, service_name, "ports", getattr(definition, "ports", ()))
+        _validate_string_tuple(errors, service_name, "volumes", getattr(definition, "volumes", ()))
+        _validate_string_tuple(
+            errors,
+            service_name,
+            "depends_on_service_healthy",
+            getattr(definition, "depends_on_service_healthy", ()),
+        )
+        healthcheck = getattr(definition, "healthcheck", None)
+        if healthcheck is not None:
+            if not getattr(healthcheck, "test", ()):
+                errors.append(f"service healthcheck.test must be non-empty: service_name={service_name}")
+            retries = getattr(healthcheck, "retries", None)
+            if not isinstance(retries, int) or retries < 1:
+                errors.append(f"service healthcheck.retries must be >= 1: service_name={service_name}")
+
+
+def _validate_string_tuple(errors: list[str], service_name: str, field_name: str, values: object) -> None:
+    if not isinstance(values, tuple) or not all(isinstance(value, str) for value in values):
+        errors.append(f"service {field_name} must be a list of strings: service_name={service_name}")
+
+
+def _matches(pattern: re.Pattern[str], value: object) -> bool:
+    return isinstance(value, str) and bool(pattern.fullmatch(value))
+
+
+def _is_lower_identifier(value: object) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[a-z][a-z0-9_]*", value))
+
+
 def _module_file_path(module_path: str) -> Path:
     return PROJECT_ROOT / (module_path.replace(".", "/") + ".py")
 
@@ -346,7 +467,10 @@ def _app_from_task_module(module_path: str) -> str | None:
     tasks_index = parts.index("tasks", 1)
     if tasks_index == 1:
         return None
-    return ".".join(parts[1:tasks_index])
+    app_parts = parts[1:tasks_index]
+    if app_parts and app_parts[-1] == "app":
+        app_parts = app_parts[:-1]
+    return ".".join(app_parts)
 
 
 def _runtime_task_namespace(module_path: str) -> str | None:
@@ -354,10 +478,14 @@ def _runtime_task_namespace(module_path: str) -> str | None:
     if len(parts) < 3:
         return None
     return {
+        "chunk": "chunk",
         "ingest_api": "ingest",
         "ingest_file": "ingest",
         "extract": "extract",
-        "llm": "serve",
+        "llm": "llm",
+        "parser": "parse",
+        "index_dense": "index",
+        "index_sparse": "index",
     }.get(parts[1])
 
 
@@ -365,7 +493,16 @@ def _runtime_task_package(module_path: str) -> str | None:
     parts = module_path.split(".")
     if len(parts) < 5 or parts[0] != "services" or parts[2] != "app" or parts[3] != "tasks":
         return None
-    if parts[1] in {"ingest_api", "ingest_file", "extract", "llm"}:
+    if parts[1] in {
+        "chunk",
+        "ingest_api",
+        "ingest_file",
+        "extract",
+        "llm",
+        "parser",
+        "index_dense",
+        "index_sparse",
+    }:
         return ".".join(parts[:4])
     return None
 
@@ -383,6 +520,8 @@ def _validate_task_schema_path(
     if task_app is not None and not (
         schema_module_path.startswith(f"apps.{task_app}.tasks.")
         or schema_module_path.startswith(f"apps.{task_app}.contracts.")
+        or schema_module_path.startswith(f"apps.{task_app}.app.tasks.")
+        or schema_module_path.startswith(f"apps.{task_app}.app.contracts.")
     ):
         errors.append(
             f"task {schema_field} must be inside the same app tasks/contracts package: "

@@ -9,7 +9,16 @@ from typing import Any, Iterable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 APPS_DIR = PROJECT_ROOT / "apps"
 SERVICES_DIR = PROJECT_ROOT / "services"
-REQUIRED_PLATFORM_SERVICES = ("postgres", "redis", "runtime-api", "runtime-dashboard")
+REQUIRED_PLATFORM_SERVICES = (
+    "postgres",
+    "redis",
+    "runtime-api",
+    "runtime-dashboard",
+    "prefect-postgres",
+    "prefect-redis",
+    "prefect-server",
+    "prefect-services",
+)
 
 
 @lru_cache(maxsize=1)
@@ -39,13 +48,7 @@ def list_task_manifest_dirs() -> tuple[Path, ...]:
 
 
 def list_worker_manifest_dirs() -> tuple[Path, ...]:
-    if not SERVICES_DIR.exists():
-        return ()
-    return tuple(
-        path / "manifests"
-        for path in sorted(SERVICES_DIR.iterdir())
-        if path.is_dir() and (path / "manifests").is_dir()
-    )
+    return (*list_app_manifest_dirs(), *list_runtime_manifest_dirs())
 
 
 def load_json_file(path: Path) -> Any:
@@ -60,7 +63,7 @@ def iter_task_manifest_paths() -> Iterable[Path]:
 
 
 def iter_queue_manifest_paths() -> Iterable[Path]:
-    for manifests_dir in list_runtime_manifest_dirs():
+    for manifests_dir in (*list_app_manifest_dirs(), *list_runtime_manifest_dirs()):
         path = manifests_dir / "queues.json"
         if path.exists():
             yield path

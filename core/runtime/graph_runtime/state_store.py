@@ -84,6 +84,27 @@ class GraphRunStore:
             finished_at=finished_at,
         )
 
+    async def mark_suspended(
+        self,
+        *,
+        run_id: str,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        conn = await self._get_connection()
+        await self._ensure_tables(conn)
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                UPDATE graph_runs
+                SET status = 'suspended',
+                    result = %s::jsonb,
+                    updated_at = NOW()
+                WHERE run_id = %s
+                """,
+                (json.dumps(result or {}), run_id),
+            )
+        await conn.commit()
+
     async def mark_skipped(
         self,
         *,
@@ -354,6 +375,28 @@ class GraphRunStore:
                 ORDER BY created_at, id
                 """,
                 (run_id,),
+            )
+            rows = await cursor.fetchall()
+        return [_serialize_row(row) for row in rows]
+
+    async def list_suspended_runs_for_task(self, *, task_id: str) -> list[dict[str, Any]]:
+        from psycopg.rows import dict_row
+
+        conn = await self._get_connection()
+        await self._ensure_tables(conn)
+        async with conn.cursor(row_factory=dict_row) as cursor:
+            await cursor.execute(
+                """
+                SELECT run_id, service_name, graph_name, trigger_type, status,
+                       current_node, completed_nodes, progress_current, progress_total,
+                       progress_percent, params, result, error, started_at, updated_at,
+                       finished_at, created_at
+                FROM graph_runs
+                WHERE status = 'suspended'
+                  AND result -> 'interrupt' ->> 'task_id' = %s
+                ORDER BY updated_at ASC
+                """,
+                (task_id,),
             )
             rows = await cursor.fetchall()
         return [_serialize_row(row) for row in rows]

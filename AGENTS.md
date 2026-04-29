@@ -51,8 +51,12 @@ Location:
 
 * `services/ingest_api`
 * `services/ingest_file`
+* `services/chunk`
 * `services/extract`
+* `services/index_dense`
+* `services/index_sparse`
 * `services/llm`
+* `services/prefect`
 * `services/runtime_api`
 * `services/runtime_dashboard`
 * `services/qdrant`
@@ -75,6 +79,12 @@ For optional dependency services:
 
 * app-selected backing capabilities such as vector databases
 * service manifests only, unless reusable task code is needed
+
+For shared pipeline runtime services:
+
+* Prefect control plane manifests live in `services/prefect`
+* Apps MUST NOT create their own Prefect server/Postgres/Redis stack
+* Apps that use Prefect add only app-specific pipeline workers under `apps/<app>/pipeline`
 
 Constraints:
 
@@ -330,7 +340,7 @@ Examples:
 * `ingest.api.fetch`
 * `ingest.file.download`
 * `extract.text.run`
-* `serve.llm.generate`
+* `llm.text.generate`
 
 ### Queue Name
 
@@ -339,7 +349,7 @@ Redis queue names use colon-separated capability/type:
 * `ingest:api`
 * `ingest:file`
 * `extract:text`
-* `serve:llm`
+* `llm:text`
 
 ### Graph Names
 
@@ -357,6 +367,27 @@ Graphs MUST NOT depend on trigger implementations. Trigger runners select a
 registered graph and pass declarative params through `GraphRunContext`.
 Use `create_graph_definition` for app graph registration so apps only provide
 graph builders, optional step builders, and initial state.
+
+### Execution Identity
+
+Platform execution identity fields are:
+
+* `request_id`: API request identity
+* `correlation_id`: cross-surface trace identity across API, graph, worker, and logs
+* `run_id`: graph run identity
+* `thread_id`: graph thread identity; MUST equal `run_id` for LangGraph-backed execution
+* `task_id`: worker task identity
+* `resource_key`: app/resource-level grouping key
+* `session_id`: optional long-lived agent or conversation session
+
+Rules:
+
+* API handlers SHOULD read `request.state.request_id` and `request.state.correlation_id` when starting app work.
+* Triggered graph requests SHOULD carry `request_id`, `correlation_id`, `resource_key`, and `session_id` when available.
+* Graph runtime stores normalized identity in `params.__runtime.identity` and exposes it through `GraphRunContext.execution_identity`.
+* Graph state SHOULD keep identity values and artifact refs, not large payloads.
+* Apps that enqueue worker tasks from graph nodes MUST propagate `correlation_id` and `resource_key`.
+* Resume requests MUST preserve the original graph run identity.
 
 ### Payload / Output Contracts
 
@@ -376,7 +407,7 @@ Use `apps/<app>/tasks` or `apps/<app>/service`.
 
 ### Q2. Is this reusable IO / processing?
 
-Use `services/ingest_api`, `services/ingest_file`, `services/extract`, or `services/llm`.
+Use `services/ingest_api`, `services/ingest_file`, `services/chunk`, `services/extract`, `services/llm`, `services/index_dense`, or `services/index_sparse`.
 
 ### Q3. Is this operational API or dashboard over runtime state?
 
@@ -395,6 +426,14 @@ Use `core/runtime/task_runtime`, `core/runtime/worker`, `core/runtime/app_servic
 * Worker/task mapping must come from manifest.
 * Platform-facing service definitions must come from manifest.
 * App metadata lives in `apps/<app>/manifests/app.json`.
+* Manifest changes MUST pass `python3 scripts/ops.py validate-config`.
+* Generated compose drift MUST be resolved with `python3 scripts/generate_compose.py`.
+* Naming/schema contract:
+  * task names use dot-separated lowercase and at least `<layer>.<capability>.<action>`
+  * queue ids use dot-separated lowercase
+  * Redis queue names use colon-separated lowercase and match queue id segments
+  * service names use kebab-case
+  * task module/schema paths must be valid Python module/class paths
 
 ---
 
@@ -422,6 +461,15 @@ python3 scripts/ops.py validate-config
 
 ```bash
 python3 scripts/ops.py check-all
+```
+
+`check-all` includes generated compose drift, config validation, boundary lint,
+unit tests, Python compile, and docker compose config checks.
+
+### Unit tests
+
+```bash
+python3 -m unittest discover -s tests -t .
 ```
 
 ### Boundary lint
@@ -484,6 +532,10 @@ Before finishing any change:
 * [ ] Correct layer placement
 * [ ] Manifest updated
 * [ ] Naming convention followed
+* [ ] `python3 scripts/ops.py validate-config` passes
+* [ ] `python3 scripts/ops.py lint-boundaries` passes
+* [ ] `python3 scripts/generate_compose.py --check` passes or compose was regenerated
+* [ ] Execution identity is propagated across API, graph, worker, and logs when the change starts or continues work
 
 ---
 

@@ -1,0 +1,5 @@
+{
+  "app": "shared.data_pipeline",
+  "description": "Shared Prefect data pipeline app",
+  "requires": {}
+}

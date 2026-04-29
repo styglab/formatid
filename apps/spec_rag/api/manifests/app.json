@@ -1,0 +1,10 @@
+{
+  "app": "spec_rag.api",
+  "description": "Spec RAG upload API",
+  "requires": {
+    "platform_services": [
+      "postgres",
+      "redis"
+    ]
+  }
+}

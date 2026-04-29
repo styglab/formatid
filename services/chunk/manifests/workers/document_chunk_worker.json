@@ -1,0 +1,11 @@
+{
+  "service_name": "document-chunk-worker",
+  "queue": "chunk.document",
+  "dockerfile": "services/chunk/infra/image/Dockerfile",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "deploy/compose/env/worker.common.env",
+    "deploy/compose/env/workers/worker.document_chunk.env"
+  ],
+  "replicas": 1
+}

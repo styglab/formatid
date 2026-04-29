@@ -1,0 +1,14 @@
+{
+  "chunk.document.run": {
+    "queue": "chunk.document",
+    "module_path": "services.chunk.app.tasks.document",
+    "payload_schema": "services.chunk.app.contracts.document.DocumentChunkPayload",
+    "output_schema": "services.chunk.app.contracts.document.DocumentChunkOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 120,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

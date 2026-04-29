@@ -1,0 +1,17 @@
+{
+  "service_name": "prefect-services",
+  "image": "prefecthq/prefect:3-latest",
+  "restart": "unless-stopped",
+  "env_files": [
+    "deploy/compose/env/prefect.env"
+  ],
+  "command": [
+    "prefect",
+    "server",
+    "services",
+    "start"
+  ],
+  "depends_on_service_healthy": [
+    "prefect-server"
+  ]
+}

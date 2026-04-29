@@ -1,0 +1,13 @@
+{
+  "parse.document": {
+    "queue_name": "parse:document",
+    "capability": "parse",
+    "kind": "document",
+    "worker_service": "document-parser-worker",
+    "description": "Generic document parsing queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

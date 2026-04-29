@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY services/llm/infra/image /tmp/build/serve_llm
-RUN pip install --no-cache-dir -r /tmp/build/serve_llm/requirements.txt
+COPY services/llm/infra/image /tmp/build/llm
+RUN pip install --no-cache-dir -r /tmp/build/llm/requirements.txt
 
 COPY services ./services
 COPY core ./core
