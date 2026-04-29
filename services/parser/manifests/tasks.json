@@ -1,0 +1,14 @@
+{
+  "parse.document.run": {
+    "queue": "parse.document",
+    "module_path": "services.parser.app.tasks.document",
+    "payload_schema": "services.parser.app.contracts.document.DocumentParsePayload",
+    "output_schema": "services.parser.app.contracts.document.DocumentParseOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 300,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

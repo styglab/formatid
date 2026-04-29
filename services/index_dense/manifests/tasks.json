@@ -1,0 +1,14 @@
+{
+  "index.dense.upsert": {
+    "queue": "index.dense",
+    "module_path": "services.index_dense.app.tasks.dense",
+    "payload_schema": "services.index_dense.app.contracts.dense.DenseIndexPayload",
+    "output_schema": "services.index_dense.app.contracts.dense.DenseIndexOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 180,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}

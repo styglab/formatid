@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from typing import Any
 
 from services.runtime_api.app.config import get_settings
@@ -75,7 +76,13 @@ async def list_service_logs(
     worker_id: str | None = None,
     level: str | None = None,
     event_name: str | None = None,
+    request_id: str | None = None,
+    run_name: str | None = None,
+    task_id: str | None = None,
+    correlation_id: str | None = None,
     after_id: int | None = None,
+    before_id: int | None = None,
+    sort: Literal["asc", "desc"] = "desc",
 ) -> list[dict[str, Any]]:
     settings = get_settings()
     from psycopg.rows import dict_row
@@ -97,9 +104,24 @@ async def list_service_logs(
         if event_name is not None:
             conditions.append("event_name = %s")
             params.append(event_name)
+        if request_id is not None:
+            conditions.append("request_id = %s")
+            params.append(request_id)
+        if run_name is not None:
+            conditions.append("run_name = %s")
+            params.append(run_name)
+        if task_id is not None:
+            conditions.append("task_id = %s")
+            params.append(task_id)
+        if correlation_id is not None:
+            conditions.append("correlation_id = %s")
+            params.append(correlation_id)
         if after_id is not None:
             conditions.append("id > %s")
             params.append(after_id)
+        if before_id is not None:
+            conditions.append("id < %s")
+            params.append(before_id)
         where_clause = "" if not conditions else "WHERE " + " AND ".join(conditions)
         params.append(limit)
         async with conn.cursor(row_factory=dict_row) as cursor:
@@ -110,7 +132,7 @@ async def list_service_logs(
                        resource_key, details, created_at
                 FROM service_logs
                 {where_clause}
-                ORDER BY id DESC
+                ORDER BY id {"ASC" if sort == "asc" else "DESC"}
                 LIMIT %s
                 """,
                 tuple(params),
@@ -118,7 +140,7 @@ async def list_service_logs(
             rows = await cursor.fetchall()
     finally:
         await conn.close()
-    return [_serialize_row(row) for row in reversed(rows)]
+    return [_serialize_row(row) for row in rows]
 
 
 async def _list_logged_sources() -> list[dict[str, Any]]:

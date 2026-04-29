@@ -28,22 +28,29 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshSeconds, setRefreshSeconds] = useState(10);
 
+  async function loadLogSources() {
+    const response = await fetchJson(api.logSources);
+    setLogSources(response.sources || []);
+  }
+
+  async function loadDashboard() {
+    const [summaryRes, trendsRes, durationsRes, appsRes] = await Promise.all([
+      fetchJson(api.summary),
+      fetchJson(api.trends),
+      fetchJson(api.durations),
+      fetchJson(api.apps),
+    ]);
+    setSummary(summaryRes);
+    setTrends(trendsRes);
+    setDurations(durationsRes);
+    setApps(appsRes.apps || []);
+  }
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [summaryRes, trendsRes, durationsRes, appsRes, logSourcesRes] = await Promise.all([
-        fetchJson(api.summary),
-        fetchJson(api.trends),
-        fetchJson(api.durations),
-        fetchJson(api.apps),
-        fetchJson(api.logSources),
-      ]);
-      setSummary(summaryRes);
-      setTrends(trendsRes);
-      setDurations(durationsRes);
-      setApps(appsRes.apps || []);
-      setLogSources(logSourcesRes.sources || []);
+      await Promise.all([loadDashboard(), loadLogSources()]);
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -58,8 +65,7 @@ function App() {
   useEffect(() => {
     if (!autoRefresh) return undefined;
     const id = setInterval(() => {
-      load();
-      if (isLogTab(activeTab)) loadLogs();
+      refreshActiveView();
     }, refreshSeconds * 1000);
     return () => clearInterval(id);
   }, [autoRefresh, refreshSeconds, activeTab, logLevel]);
@@ -74,13 +80,33 @@ function App() {
     const source = parseLogTab(activeTab);
     if (!source) return;
     try {
-      const params = new URLSearchParams({ service_name: source.serviceName, limit: "300" });
+      const params = new URLSearchParams({
+        service_name: source.serviceName,
+        limit: "300",
+        sort: "desc",
+      });
       if (source.workerId) params.set("worker_id", source.workerId);
       if (logLevel) params.set("level", logLevel);
       const response = await fetchJson(`/api/logs?${params.toString()}`);
       setLogs(response.logs || []);
     } catch (err) {
       setError(err.message || String(err));
+    }
+  }
+
+  async function refreshActiveView() {
+    setLoading(true);
+    setError(null);
+    try {
+      if (isLogTab(activeTab)) {
+        await Promise.all([loadLogSources(), loadLogs()]);
+        return;
+      }
+      await load();
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -97,7 +123,7 @@ function App() {
       setAutoRefresh,
       refreshSeconds,
       setRefreshSeconds,
-      onRefresh: load,
+      onRefresh: refreshActiveView,
     }),
     React.createElement(
       "div",
@@ -113,7 +139,6 @@ function App() {
               logs,
               logLevel,
               setLogLevel,
-              onRefresh: loadLogs,
             })
           : activeTab === "runtime"
           ? React.createElement(RuntimeView, { summary, trends, durations })
@@ -473,7 +498,7 @@ function DurationCard({ durations }) {
   );
 }
 
-function LogsView({ source, logs, logLevel, setLogLevel, onRefresh }) {
+function LogsView({ source, logs, logLevel, setLogLevel }) {
   const title = source.workerId ? `${source.serviceName} / ${source.workerId}` : source.serviceName;
   return React.createElement(
     React.Fragment,
@@ -500,8 +525,7 @@ function LogsView({ source, logs, logLevel, setLogLevel, onRefresh }) {
             ["warning", "Warning"],
             ["error", "Error"],
           ].map(([value, label]) => React.createElement("option", { key: value, value }, label))
-        ),
-        React.createElement("button", { className: "btn", onClick: onRefresh }, "Refresh")
+        )
       )
     ),
     React.createElement(

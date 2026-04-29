@@ -1,0 +1,14 @@
+{
+  "service_name": "prefect-redis",
+  "image": "redis:7",
+  "restart": "unless-stopped",
+  "volumes": [
+    "${PREFECT_REDIS_DATA_DIR:-../../data/prefect/redis}:/data"
+  ],
+  "healthcheck": {
+    "test": ["CMD-SHELL", "redis-cli ping"],
+    "interval": "5s",
+    "timeout": "5s",
+    "retries": 5
+  }
+}

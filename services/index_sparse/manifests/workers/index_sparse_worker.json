@@ -1,0 +1,11 @@
+{
+  "service_name": "index-sparse-worker",
+  "queue": "index.sparse",
+  "dockerfile": "services/index_sparse/infra/image/Dockerfile",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "deploy/compose/env/worker.common.env",
+    "deploy/compose/env/workers/worker.index_sparse.env"
+  ],
+  "replicas": 1
+}

@@ -1,0 +1,27 @@
+{
+  "service_name": "prefect-server",
+  "image": "prefecthq/prefect:3-latest",
+  "restart": "unless-stopped",
+  "env_files": [
+    "deploy/compose/env/prefect.env"
+  ],
+  "command": [
+    "prefect",
+    "server",
+    "start",
+    "--no-services"
+  ],
+  "ports": [
+    "${PREFECT_HOST_PORT:-4200}:4200"
+  ],
+  "depends_on_service_healthy": [
+    "prefect-postgres",
+    "prefect-redis"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)"],
+    "interval": "30s",
+    "timeout": "10s",
+    "retries": 3
+  }
+}

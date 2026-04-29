@@ -1,6 +1,6 @@
 {
-  "serve.llm.generate": {
-    "queue": "serve.llm",
+  "llm.text.generate": {
+    "queue": "llm.text",
     "module_path": "services.llm.app.tasks.llm",
     "payload_schema": "services.llm.app.tasks.schemas.LlmGenerateStorePayload",
     "max_retries": 3,

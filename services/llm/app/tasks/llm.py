@@ -11,7 +11,7 @@ from core.runtime.task_runtime.registry import task
 from core.runtime.task_runtime.schemas import TaskMessage, TaskResult
 
 
-@task("serve.llm.generate")
+@task("llm.text.generate")
 async def generate_text_and_store(message: TaskMessage) -> TaskResult:
     payload = message.payload
     request = payload.get("request", {})
@@ -44,14 +44,29 @@ async def generate_text_and_store(message: TaskMessage) -> TaskResult:
 
 async def _read_text(source: dict) -> str:
     conn = await connect(get_database_url(source.get("database_url_env", "POSTGRES_DATABASE_URL")))
+    key_column = source.get("key_column", "resource_key")
+    text_column = source.get("text_column", "text")
     try:
         async with conn.cursor(row_factory=dict_row) as cursor:
+            if source.get("aggregate"):
+                await cursor.execute(
+                    sql.SQL("SELECT {} FROM {}.{} WHERE {} = %s ORDER BY {}").format(
+                        sql.Identifier(text_column),
+                        sql.Identifier(source["schema"]),
+                        sql.Identifier(source["table"]),
+                        sql.Identifier(key_column),
+                        sql.Identifier(source.get("order_column", "chunk_index")),
+                    ),
+                    (source.get("key_value") or source.get("job_id"),),
+                )
+                rows = await cursor.fetchall()
+                return "\n\n".join(str(row[text_column] or "") for row in rows)
             await cursor.execute(
                 sql.SQL("SELECT {} FROM {}.{} WHERE {} = %s").format(
-                    sql.Identifier(source.get("text_column", "text")),
+                    sql.Identifier(text_column),
                     sql.Identifier(source["schema"]),
                     sql.Identifier(source["table"]),
-                    sql.Identifier(source.get("key_column", "job_id")),
+                    sql.Identifier(key_column),
                 ),
                 (source.get("key_value") or source.get("job_id"),),
             )
@@ -73,6 +88,30 @@ async def _write_generation(*, target: dict, output_text: str, raw_result: dict)
     key_value = target.get("key_value") or target.get("job_id")
     try:
         async with conn.cursor() as cursor:
+            await cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(target["schema"])))
+            await cursor.execute(
+                sql.SQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS {}.{} (
+                        {} TEXT PRIMARY KEY,
+                        {} TEXT NOT NULL,
+                        {} TEXT,
+                        {} TEXT,
+                        {} JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                ).format(
+                    sql.Identifier(target["schema"]),
+                    sql.Identifier(target["table"]),
+                    sql.Identifier(key_column),
+                    sql.Identifier(output_text_column),
+                    sql.Identifier(model_column),
+                    sql.Identifier(prompt_version_column),
+                    sql.Identifier(raw_result_column),
+                )
+            )
             await cursor.execute(
                 sql.SQL(
                     """

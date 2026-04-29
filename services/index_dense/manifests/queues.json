@@ -1,0 +1,13 @@
+{
+  "index.dense": {
+    "queue_name": "index:dense",
+    "capability": "index",
+    "kind": "dense",
+    "worker_service": "index-dense-worker",
+    "description": "Generic dense vector indexing queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

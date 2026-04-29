@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Query
 
 from services.runtime_api.app.schemas.logs import (
@@ -27,7 +29,13 @@ async def get_service_logs(
     worker_id: str | None = None,
     level: str | None = None,
     event_name: str | None = None,
+    request_id: str | None = None,
+    run_name: str | None = None,
+    task_id: str | None = None,
+    correlation_id: str | None = None,
     after_id: int | None = Query(default=None, ge=1),
+    before_id: int | None = Query(default=None, ge=1),
+    sort: Literal["asc", "desc"] = Query(default="desc"),
 ) -> ServiceLogListResponse:
     rows = await list_service_logs(
         limit=limit,
@@ -35,6 +43,12 @@ async def get_service_logs(
         worker_id=worker_id,
         level=level,
         event_name=event_name,
+        request_id=request_id,
+        run_name=run_name,
+        task_id=task_id,
+        correlation_id=correlation_id,
         after_id=after_id,
+        before_id=before_id,
+        sort=sort,
     )
     return ServiceLogListResponse(logs=[ServiceLogEntry.model_validate(row) for row in rows])

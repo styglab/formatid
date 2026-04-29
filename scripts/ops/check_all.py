@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import py_compile
+import unittest
+from io import StringIO
 from pathlib import Path
 
 from scripts.generate_compose import check_compose
@@ -14,6 +16,7 @@ def check_all() -> dict:
     checks.append(_check_compose_sync())
     checks.append(_check_validate_config())
     checks.append(_check_boundaries())
+    checks.append(_check_unit_tests())
     checks.append(_check_compileall())
     checks.append(_check_docker_compose_config())
 
@@ -68,6 +71,35 @@ def _check_compileall() -> dict[str, object]:
         "name": "compileall",
         "valid": not errors,
         "errors": errors,
+    }
+
+
+def _check_unit_tests() -> dict[str, object]:
+    tests_dir = PROJECT_ROOT / "tests"
+    if not tests_dir.exists():
+        return {
+            "name": "unit-tests",
+            "valid": True,
+            "errors": [],
+            "summary": {"testsRun": 0, "skipped": True},
+        }
+    suite = unittest.defaultTestLoader.discover(str(tests_dir), top_level_dir=str(PROJECT_ROOT))
+    stream = StringIO()
+    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+    errors = [
+        *(f"{case.id()}: {error}" for case, error in result.errors),
+        *(f"{case.id()}: {failure}" for case, failure in result.failures),
+    ]
+    return {
+        "name": "unit-tests",
+        "valid": result.wasSuccessful(),
+        "errors": errors,
+        "summary": {
+            "testsRun": result.testsRun,
+            "failures": len(result.failures),
+            "errors": len(result.errors),
+            "output": stream.getvalue().strip(),
+        },
     }
 
 

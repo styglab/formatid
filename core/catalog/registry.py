@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from core.catalog.app_catalog import list_required_platform_services, list_required_workers
 from core.catalog.app_service_catalog import list_app_service_definitions
+from core.catalog.capability_catalog import CapabilityRegistry, load_capability_registry
 from core.catalog.platform_service_catalog import (
     PlatformServiceDefinition,
     list_active_platform_service_definitions,
@@ -25,6 +26,7 @@ class CatalogRegistry:
     tasks: tuple[TaskDefinition, ...]
     required_platform_services: tuple[str, ...]
     required_workers: tuple[str, ...]
+    capabilities: CapabilityRegistry
 
     @classmethod
     def load(cls) -> "CatalogRegistry":
@@ -38,4 +40,5 @@ class CatalogRegistry:
             tasks=list_task_definitions(),
             required_platform_services=list_required_platform_services(),
             required_workers=list_required_workers(),
+            capabilities=load_capability_registry(),
         )

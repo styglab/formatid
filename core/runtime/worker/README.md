@@ -282,7 +282,7 @@ python3 scripts/generate_compose.py
 - `ingest-api-worker`: `ingest:api` 큐를 소비하는 consumer
 - `ingest-file-worker`: `ingest:file` 큐를 소비하는 consumer
 - `extract-text-worker`: `extract:text` 큐를 소비하는 consumer
-- `serve-llm-worker`: `serve:llm` 큐를 소비하는 consumer
+- `llm-worker`: `llm:text` 큐를 소비하는 consumer
 
 ## Add A Worker Service
 새로운 task service는 새로운 worker 컨테이너에서 실행하는 구조입니다.

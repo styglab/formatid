@@ -7,6 +7,7 @@ from collections.abc import Callable
 from core.runtime.app_service.runtime.core import AppServiceRuntime
 from core.runtime.app_service.runtime.logger import log_event
 from core.runtime.app_service.runtime.run_store import ServiceRunStore
+from core.runtime.graph_runtime.checkpointer import AsyncGraphCheckpointer
 from core.runtime.graph_runtime.queue import TriggeredGraphQueue, TriggeredGraphRequest
 from core.runtime.graph_runtime.registry import GraphRegistry
 from core.runtime.graph_runtime.runner import GraphResultDetails, run_registered_graph
@@ -23,6 +24,8 @@ async def consume_triggered_graphs(
     queue: TriggeredGraphQueue,
     checkpoint_store: PostgresCheckpointStore,
     run_store: ServiceRunStore,
+    graph_checkpointer: AsyncGraphCheckpointer | None = None,
+    resume_queue_name: str | None = None,
     max_attempts: int = 3,
     run_name_builder: RunNameBuilder | None = None,
     result_details: GraphResultDetails | None = None,
@@ -45,6 +48,8 @@ async def consume_triggered_graphs(
             queue=queue,
             checkpoint_store=checkpoint_store,
             run_store=run_store,
+            graph_checkpointer=graph_checkpointer,
+            resume_queue_name=resume_queue_name or queue.queue_name,
             request=request,
             max_attempts=max_attempts,
             run_name_builder=run_name_builder,
@@ -59,6 +64,8 @@ async def _run_triggered_request(
     queue: TriggeredGraphQueue,
     checkpoint_store: PostgresCheckpointStore,
     run_store: ServiceRunStore,
+    graph_checkpointer: AsyncGraphCheckpointer | None,
+    resume_queue_name: str | None,
     request: TriggeredGraphRequest,
     max_attempts: int,
     run_name_builder: RunNameBuilder | None,
@@ -72,14 +79,26 @@ async def _run_triggered_request(
             trigger="triggered",
             checkpoint_store=checkpoint_store,
             run_store=run_store,
+            graph_checkpointer=graph_checkpointer,
+            resume_queue_name=resume_queue_name,
             run_name=_run_name(request=request, run_name_builder=run_name_builder),
             run_id=request.run_id,
             params=request.params,
+            request_id=request.request_id,
+            correlation_id=request.correlation_id,
+            resource_key=request.resource_key,
+            session_id=request.session_id,
+            resume_value=request.resume_value if request.request_kind == "resume" else None,
             trigger_config={
                 "queue": queue.queue_name,
                 "attempts": request.attempts,
                 "requested_by": request.requested_by,
+                "request_id": request.request_id,
+                "correlation_id": request.correlation_id,
+                "resource_key": request.resource_key,
+                "session_id": request.session_id,
                 "requested_at": request.requested_at,
+                "request_kind": request.request_kind,
                 "lock_enabled": runtime.settings.service_lock_enabled,
                 "lock_ttl_seconds": runtime.settings.service_lock_ttl_seconds,
             },

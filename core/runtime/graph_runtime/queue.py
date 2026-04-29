@@ -14,7 +14,13 @@ class TriggeredGraphRequest:
     graph_name: str
     params: dict[str, Any] = field(default_factory=dict)
     run_id: str = field(default_factory=lambda: uuid4().hex)
+    request_kind: str = "start"
+    resume_value: Any | None = None
     requested_by: str | None = None
+    request_id: str | None = None
+    correlation_id: str | None = None
+    resource_key: str | None = None
+    session_id: str | None = None
     requested_at: str = field(default_factory=lambda: now().isoformat())
     attempts: int = 0
 
@@ -25,7 +31,13 @@ class TriggeredGraphRequest:
             graph_name=data["graph_name"],
             params=data.get("params", {}),
             run_id=data.get("run_id") or uuid4().hex,
+            request_kind=data.get("request_kind") or "start",
+            resume_value=data.get("resume_value"),
             requested_by=data.get("requested_by"),
+            request_id=data.get("request_id"),
+            correlation_id=data.get("correlation_id"),
+            resource_key=data.get("resource_key"),
+            session_id=data.get("session_id"),
             requested_at=data.get("requested_at") or now().isoformat(),
             attempts=int(data.get("attempts", 0)),
         )
@@ -38,7 +50,13 @@ class TriggeredGraphRequest:
             graph_name=self.graph_name,
             params=self.params,
             run_id=self.run_id,
+            request_kind=self.request_kind,
+            resume_value=self.resume_value,
             requested_by=self.requested_by,
+            request_id=self.request_id,
+            correlation_id=self.correlation_id,
+            resource_key=self.resource_key,
+            session_id=self.session_id,
             requested_at=self.requested_at,
             attempts=self.attempts + 1,
         )

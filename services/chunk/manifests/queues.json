@@ -1,0 +1,13 @@
+{
+  "chunk.document": {
+    "queue_name": "chunk:document",
+    "capability": "chunk",
+    "kind": "document",
+    "worker_service": "document-chunk-worker",
+    "description": "Generic document chunking queue",
+    "policies": {
+      "pause_supported": true,
+      "dlq_enabled": true
+    }
+  }
+}

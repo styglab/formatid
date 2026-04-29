@@ -1,8 +1,0 @@
-{
-  "app": "g2b.api",
-  "description": "G2B API app",
-  "requires": {
-    "platform_services": [],
-    "workers": []
-  }
-}

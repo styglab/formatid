@@ -1,0 +1,14 @@
+{
+  "index.sparse.upsert": {
+    "queue": "index.sparse",
+    "module_path": "services.index_sparse.app.tasks.sparse",
+    "payload_schema": "services.index_sparse.app.contracts.sparse.SparseIndexPayload",
+    "output_schema": "services.index_sparse.app.contracts.sparse.SparseIndexOutput",
+    "max_retries": 3,
+    "retryable": true,
+    "backoff_seconds": 5,
+    "timeout_seconds": 180,
+    "dlq_enabled": true,
+    "dlq_requeue_limit": 3
+  }
+}
