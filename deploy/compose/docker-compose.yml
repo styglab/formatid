@@ -131,6 +131,22 @@ services:
       runtime-api:
         condition: service_healthy
 
+  g2b-mcp:
+    build:
+      context: ../..
+      dockerfile: apps/g2b_mcp/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ../../apps/g2b_mcp/infra/env/app.env
+    ports:
+      - "${G2B_MCP_HOST_PORT:-8013}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   shared-data-pipeline-worker:
     build:
       context: ../..
@@ -141,6 +157,7 @@ services:
     env_file:
       - ./env/postgres.env
       - ../../apps/shared/data_pipeline/infra/env/app.env
+      - ../../apps/g2b_mcp/infra/env/app.env
     depends_on:
       prefect-server:
         condition: service_healthy

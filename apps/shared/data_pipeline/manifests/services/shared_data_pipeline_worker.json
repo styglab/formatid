@@ -7,7 +7,8 @@
   "restart": "unless-stopped",
   "env_files": [
     "deploy/compose/env/postgres.env",
-    "apps/shared/data_pipeline/infra/env/app.env"
+    "apps/shared/data_pipeline/infra/env/app.env",
+    "apps/g2b_mcp/infra/env/app.env"
   ],
   "command": [
     "sh",
