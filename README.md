@@ -322,6 +322,16 @@ Prefect API health를 확인합니다.
 docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml exec -T shared-data-pipeline-worker prefect deployment inspect spec-rag-indexing/hourly
 ```
 
+## MCP Test App
+
+`apps/shared/mcp_test`는 MCPJam Inspector 기반의 공용 MCP 테스트 앱입니다.
+기본 compose service는 `mcpjam`이며, UI는 `http://localhost:6274`에서 확인합니다.
+현재 `g2b-mcp` 서버(`http://g2b-mcp:8000/mcp`)를 테스트 대상으로 설정합니다.
+
+```bash
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml up -d mcpjam g2b-mcp
+```
+
 ## App Service Runtime
 
 App service runtime은 실행 방식에 종속되지 않는 공통 lifecycle만 제공합니다.

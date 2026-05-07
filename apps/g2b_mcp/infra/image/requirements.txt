@@ -1,0 +1,4 @@
+fastmcp 
+requests 
+python-dateutil
+psycopg[binary]
