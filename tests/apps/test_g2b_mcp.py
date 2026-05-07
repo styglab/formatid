@@ -2,109 +2,219 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from importlib.util import find_spec
 from unittest.mock import patch
 
-from apps.g2b_mcp.app.adapters import g2b
-from apps.g2b_mcp.app.schemas.normalize import normalize_bid
+if find_spec("psycopg"):
+    from apps.g2b_mcp.app.adapters import db
+    from apps.g2b_mcp.app.adapters import live
+else:
+    db = None
+    live = None
 
 
-class FixedDateTime(datetime):
-    @classmethod
-    def now(cls, tz=None):
-        return cls(2026, 5, 5, 14, 30, tzinfo=tz)
+class FakeCursor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, tuple[object, ...]]] = []
 
+    def __enter__(self) -> FakeCursor:
+        return self
 
-class FakeResponse:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-
-    def raise_for_status(self) -> None:
+    def __exit__(self, *args: object) -> None:
         return None
 
-    def json(self) -> dict:
-        return self.payload
+    def execute(self, query: object, params: tuple[object, ...]) -> None:
+        self.calls.append((query, params))
 
+    def fetchone(self) -> dict[str, int]:
+        return {"count": 3}
 
-class G2BMCPTests(unittest.TestCase):
-    def test_fetch_bids_uses_published_from_and_walks_all_pages(self) -> None:
-        calls: list[dict] = []
-        payloads = [
+    def fetchall(self) -> list[dict[str, object]]:
+        return [
             {
-                "response": {
-                    "body": {
-                        "totalCount": "3",
-                        "items": [{"bidNtceNo": "1"}, {"bidNtceNo": "2"}],
-                    }
-                }
-            },
-            {
-                "response": {
-                    "body": {
-                        "totalCount": "3",
-                        "items": [{"bidNtceNo": "3"}],
-                    }
-                }
-            },
+                "resource_key": "SERVICE:1:000",
+                "category": "SERVICE",
+                "category_label": "용역",
+                "bid_notice_no": "1",
+                "bid_notice_order": "000",
+                "title": "First bid",
+                "organization_name": "Org",
+                "demand_org_name": "Demand",
+                "budget": Decimal("123000"),
+                "published_at": datetime(2026, 5, 1, 12, 0, tzinfo=db.G2B_TIMEZONE),
+                "deadline_at": datetime(2026, 5, 10, 18, 0, tzinfo=db.G2B_TIMEZONE),
+                "opening_at": None,
+                "contract_method": "일반경쟁",
+                "bid_method": "전자입찰",
+                "notice_kind": "일반공고",
+                "detail_url": "https://example.test/bid/1",
+            }
         ]
 
-        def fake_get(url: str, *, params: dict, timeout: int) -> FakeResponse:
-            calls.append(params)
-            return FakeResponse(payloads[len(calls) - 1])
+
+class FakeConnection:
+    def __init__(self, cursor: FakeCursor) -> None:
+        self._cursor = cursor
+
+    def __enter__(self) -> FakeConnection:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def cursor(self) -> FakeCursor:
+        return self._cursor
+
+
+@unittest.skipUnless(find_spec("psycopg"), "psycopg is not installed")
+class G2BMCPTests(unittest.TestCase):
+    def test_search_bids_applies_filters_pagination_and_sort_metadata(self) -> None:
+        cursor = FakeCursor()
 
         with (
-            patch.object(g2b, "API_KEY", "test-key"),
-            patch.object(g2b, "datetime", FixedDateTime),
-            patch.dict("os.environ", {"G2B_NUM_OF_ROWS": "2"}),
-            patch.object(g2b.requests, "get", side_effect=fake_get),
+            patch.dict("os.environ", {"G2B_MCP_DATABASE_URL": "postgresql://test", "G2B_MCP_MAX_LIMIT": "20"}),
+            patch.object(db.psycopg, "connect", return_value=FakeConnection(cursor)) as connect,
         ):
-            items = g2b.fetch_bids_by_category("SERVICE", "2026-05-01")
-
-        self.assertEqual(items, [{"bidNtceNo": "1"}, {"bidNtceNo": "2"}, {"bidNtceNo": "3"}])
-        self.assertEqual([call["pageNo"] for call in calls], [1, 2])
-        self.assertEqual(calls[0]["numOfRows"], 2)
-        self.assertEqual(calls[0]["inqryBgnDt"], "202605010000")
-        self.assertEqual(calls[0]["inqryEndDt"], "202605051430")
-
-    def test_normalize_bid_accepts_g2b_hyphenated_datetime(self) -> None:
-        with patch("apps.g2b_mcp.app.schemas.normalize.datetime", FixedDateTime):
-            bid = normalize_bid(
-                {
-                    "bidNtceNo": "1",
-                    "bidNtceNm": "First bid",
-                    "bidNtceDt": "2026-05-01 07:08:09",
-                    "bidClseDt": "2026-05-06 14:00:00",
-                }
+            result = db.search_bids(
+                category="service",
+                keyword="cloud",
+                deadline_to="2026-05-31",
+                min_budget="100,000",
+                limit=5,
+                offset=2,
+                sort_by="deadline_at",
+                sort_order="asc",
             )
 
-        self.assertEqual(bid["published_at"], "2026-05-01T07:08:09")
-        self.assertEqual(bid["deadline"], "2026-05-06T14:00:00")
-        self.assertEqual(bid["deadline_days"], 0)
+        connect.assert_called_once()
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["returned"], 1)
+        self.assertEqual(result["limit"], 5)
+        self.assertEqual(result["offset"], 2)
+        self.assertFalse(result["has_more"])
+        self.assertEqual(result["sort"], {"by": "deadline_at", "order": "asc"})
+        self.assertEqual(result["bids"][0]["id"], "SERVICE:1:000")
+        self.assertEqual(result["bids"][0]["budget"], 123000)
 
-    @unittest.skipUnless(find_spec("fastmcp"), "fastmcp is not installed")
-    def test_search_bid_returns_first_10_normalized_bids(self) -> None:
-        from apps.g2b_mcp.app.main import search_bid
+        self.assertEqual(len(cursor.calls), 2)
+        rows_params = cursor.calls[1][1]
+        self.assertEqual(rows_params[0], "SERVICE")
+        self.assertEqual(rows_params[1:4], ("%cloud%", "%cloud%", "%cloud%"))
+        self.assertEqual(rows_params[-2:], (5, 2))
 
+    def test_search_bids_rejects_invalid_input_before_connecting(self) -> None:
+        with patch.object(db.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "Invalid category"):
+                db.search_bids(category="bad")
+        connect.assert_not_called()
+
+        with patch.object(db.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "offset"):
+                db.search_bids(offset=-1)
+        connect.assert_not_called()
+
+        with patch.object(db.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "Invalid sort_by"):
+                db.search_bids(sort_by="title")
+        connect.assert_not_called()
+
+    def test_date_only_upper_bound_includes_entire_day(self) -> None:
+        parsed = db._parse_datetime("2026-05-31", end_of_day=True)
+
+        self.assertEqual(parsed.isoformat(), "2026-05-31T23:59:59+09:00")
+
+    def test_live_search_normalizes_filters_and_paginates_api_results(self) -> None:
         raw_items = [
             {
-                "bidNtceNo": str(index),
-                "bidNtceNm": f"Bid {index}",
-                "bidNtceDt": "202605011200",
-                "bidClseDt": "202605101200",
-            }
-            for index in range(12)
+                "bidNtceNo": "1",
+                "bidNtceOrd": "000",
+                "bidNtceNm": "Cloud migration",
+                "ntceInsttNm": "Seoul Office",
+                "dminsttNm": "Seoul Demand",
+                "presmptPrce": "200,000",
+                "bidNtceDt": "2026-05-01 12:00:00",
+                "bidClseDt": "2026-05-10 18:00:00",
+            },
+            {
+                "bidNtceNo": "2",
+                "bidNtceOrd": "000",
+                "bidNtceNm": "Desk purchase",
+                "ntceInsttNm": "Busan Office",
+                "presmptPrce": "50,000",
+                "bidNtceDt": "2026-05-02 12:00:00",
+                "bidClseDt": "2026-05-11 18:00:00",
+            },
         ]
 
-        with (
-            patch("apps.g2b_mcp.app.main.fetch_bids_by_category", return_value=raw_items) as fetch,
-            patch("apps.g2b_mcp.app.schemas.normalize.datetime", FixedDateTime),
-        ):
-            result = search_bid.fn("SERVICE", "20260501")
+        with patch.object(live, "fetch_bids_by_category", return_value=raw_items) as fetch:
+            result = live.search_live_bids(
+                category="SERVICE",
+                keyword="cloud",
+                min_budget="100000",
+                limit=1,
+                offset=0,
+            )
 
-        fetch.assert_called_once_with("SERVICE", "20260501")
-        self.assertEqual(result["count"], 12)
-        self.assertEqual(len(result["bids"]), 10)
-        self.assertEqual([bid["bid_id"] for bid in result["bids"]], [str(index) for index in range(10)])
+        fetch.assert_called_once_with("SERVICE", published_from=None)
+        self.assertEqual(result["source"], "g2b_api")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["returned"], 1)
+        self.assertEqual(result["bids"][0]["id"], "SERVICE:1:000")
+        self.assertEqual(result["bids"][0]["budget"], 200000)
+
+    @unittest.skipUnless(find_spec("fastmcp"), "fastmcp is not installed")
+    def test_search_bid_returns_structured_validation_error(self) -> None:
+        from apps.g2b_mcp.app.main import search_bid
+
+        with patch("apps.g2b_mcp.app.main.search_bids", side_effect=ValueError("Invalid category: BAD")):
+            result = search_bid.fn(category="BAD")
+
+        self.assertEqual(
+            result,
+            {
+                "error": {
+                    "type": "invalid_request",
+                    "message": "Invalid category: BAD",
+                }
+            },
+        )
+
+    @unittest.skipUnless(find_spec("fastmcp"), "fastmcp is not installed")
+    def test_search_bid_falls_back_to_live_api_when_db_is_empty(self) -> None:
+        from apps.g2b_mcp.app.main import search_bid
+
+        db_result = {
+            "source": "normalized_db",
+            "count": 0,
+            "returned": 0,
+            "limit": 10,
+            "offset": 0,
+            "has_more": False,
+            "sort": {"by": "published_at", "order": "desc"},
+            "bids": [],
+        }
+        live_result = {
+            "source": "g2b_api",
+            "count": 1,
+            "returned": 1,
+            "limit": 10,
+            "offset": 0,
+            "has_more": False,
+            "sort": {"by": "published_at", "order": "desc"},
+            "bids": [{"id": "SERVICE:1:000"}],
+        }
+
+        with (
+            patch("apps.g2b_mcp.app.main.search_bids", return_value=db_result) as search_db,
+            patch("apps.g2b_mcp.app.main.search_live_bids", return_value=live_result) as search_live,
+        ):
+            result = search_bid.fn(category="SERVICE")
+
+        search_db.assert_called_once()
+        search_live.assert_called_once()
+        self.assertEqual(result["source"], "g2b_api")
+        self.assertEqual(result["fallback_from"], "normalized_db_empty")
 
 
 if __name__ == "__main__":
