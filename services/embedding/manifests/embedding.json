@@ -6,7 +6,7 @@
   "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
   "restart": "unless-stopped",
   "ports": [
-    "${EMBEDDING_HOST_PORT:-8020}:8000"
+    "${HOST_BIND_IP:-127.0.0.1}:${EMBEDDING_HOST_PORT:-8020}:8000"
   ],
   "healthcheck": {
     "test": [

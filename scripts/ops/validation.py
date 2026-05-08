@@ -129,6 +129,30 @@ def validate_config() -> dict:
             errors.append(
                 f"app manifest app must match directory path: path={path} app={app_name} directory={_app_name_from_manifest_path(path)}"
             )
+        enabled = payload.get("enabled", True)
+        if not isinstance(enabled, bool):
+            errors.append(f"app manifest enabled must be boolean: app={app_name}")
+        profiles = payload.get("profiles", [])
+        if not isinstance(profiles, list) or not all(isinstance(value, str) for value in profiles):
+            errors.append(f"app manifest profiles must be a list of strings: app={app_name}")
+        else:
+            for profile in profiles:
+                if not _matches(SERVICE_NAME_PATTERN, profile):
+                    errors.append(f"app manifest profile must be kebab-case: app={app_name} profile={profile}")
+            duplicated_profiles = _duplicated_strings(profiles)
+            if duplicated_profiles:
+                errors.append(f"app manifest profiles contains duplicates: app={app_name} values={duplicated_profiles}")
+            if isinstance(app_name, str):
+                app_profile = app_name.replace(".", "-").replace("_", "-")
+                domain_profile = re.split(r"[._]", app_name, maxsplit=1)[0].replace("_", "-")
+                if app_profile not in profiles:
+                    errors.append(
+                        f"app manifest profiles must include app-specific profile: app={app_name} profile={app_profile}"
+                    )
+                if domain_profile != app_profile and domain_profile not in profiles:
+                    errors.append(
+                        f"app manifest profiles must include domain profile: app={app_name} profile={domain_profile}"
+                    )
         requires = payload.get("requires", {})
         if requires is not None and not isinstance(requires, dict):
             errors.append(f"app manifest requires must be an object: app={app_name}")
@@ -177,6 +201,49 @@ def validate_config() -> dict:
             for env_file in dashboard.get("env_files", []):
                 if not (PROJECT_ROOT / env_file).exists():
                     errors.append(f"app dashboard env file does not exist: app={app_name} env_file={env_file}")
+        nginx_routes = payload.get("nginx_routes", [])
+        if not isinstance(nginx_routes, list):
+            errors.append(f"app nginx_routes must be a list: app={app_name}")
+        else:
+            for route in nginx_routes:
+                if not isinstance(route, dict):
+                    errors.append(f"app nginx_routes item must be an object: app={app_name}")
+                    continue
+                source = route.get("source")
+                target = route.get("target")
+                if source is not None:
+                    if not isinstance(source, str) or not source:
+                        errors.append(f"app nginx_routes.source must be a non-empty string: app={app_name}")
+                    elif not (PROJECT_ROOT / source).exists():
+                        errors.append(f"app nginx route source does not exist: app={app_name} source={source}")
+                    if target is not None and (
+                        not isinstance(target, str) or not target.startswith("/etc/nginx/app-routes/")
+                    ):
+                        errors.append(
+                            f"app nginx_routes.target must be under /etc/nginx/app-routes: app={app_name} target={target}"
+                        )
+                    continue
+                path_prefix = route.get("path_prefix")
+                upstream_service = route.get("upstream_service")
+                upstream_port = route.get("upstream_port", 8000)
+                strip_prefix = route.get("strip_prefix", True)
+                proxy_buffering = route.get("proxy_buffering")
+                for timeout_field in ("proxy_read_timeout", "proxy_send_timeout"):
+                    timeout_value = route.get(timeout_field)
+                    if timeout_value is not None and not isinstance(timeout_value, str):
+                        errors.append(f"app nginx_routes.{timeout_field} must be a string: app={app_name}")
+                if not isinstance(path_prefix, str) or not path_prefix.startswith("/"):
+                    errors.append(f"app nginx_routes.path_prefix must start with /: app={app_name}")
+                if not isinstance(upstream_service, str) or not _matches(SERVICE_NAME_PATTERN, upstream_service):
+                    errors.append(
+                        f"app nginx_routes.upstream_service must be kebab-case service name: app={app_name}"
+                    )
+                if not isinstance(upstream_port, int) or upstream_port < 1:
+                    errors.append(f"app nginx_routes.upstream_port must be a positive integer: app={app_name}")
+                if not isinstance(strip_prefix, bool):
+                    errors.append(f"app nginx_routes.strip_prefix must be boolean: app={app_name}")
+                if proxy_buffering is not None and not isinstance(proxy_buffering, bool):
+                    errors.append(f"app nginx_routes.proxy_buffering must be boolean: app={app_name}")
         worker_env_files = payload.get("worker_env_files")
         if isinstance(worker_env_files, dict):
             worker_env_values: dict[str, str] = {}
@@ -422,6 +489,7 @@ def _validate_catalog_schema(
         _validate_string_tuple(errors, service_name, "command", getattr(definition, "command", ()))
         _validate_string_tuple(errors, service_name, "env_files", getattr(definition, "env_files", ()))
         _validate_string_tuple(errors, service_name, "ports", getattr(definition, "ports", ()))
+        _validate_string_tuple(errors, service_name, "profiles", getattr(definition, "profiles", ()))
         _validate_string_tuple(errors, service_name, "volumes", getattr(definition, "volumes", ()))
         _validate_string_tuple(
             errors,

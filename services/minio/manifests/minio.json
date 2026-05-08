@@ -13,8 +13,8 @@
     "deploy/compose/env/minio.env"
   ],
   "ports": [
-    "${MINIO_API_HOST_PORT:-9000}:9000",
-    "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    "${HOST_BIND_IP:-127.0.0.1}:${MINIO_API_HOST_PORT:-9000}:9000",
+    "${HOST_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
   ],
   "volumes": [
     "${MINIO_DATA_DIR:-../../data/minio}:/data"

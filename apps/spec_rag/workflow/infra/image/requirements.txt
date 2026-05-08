@@ -1,5 +1,0 @@
-apscheduler
-langgraph
-langgraph-checkpoint-postgres
-psycopg[binary]
-redis

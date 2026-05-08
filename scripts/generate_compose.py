@@ -1,4 +1,6 @@
 import argparse
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -8,9 +10,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.catalog.platform_service_catalog import list_active_platform_service_definitions
 from core.catalog.app_service_catalog import list_app_service_definitions
+from core.catalog.app_catalog import list_app_nginx_route_definitions, list_app_nginx_route_sources
 from core.catalog.service_catalog import list_service_definitions
 
 COMPOSE_OUTPUT_PATH = PROJECT_ROOT / "deploy" / "compose" / "docker-compose.yml"
+NGINX_APP_ROUTES_OUTPUT_DIR = PROJECT_ROOT / "deploy" / "compose" / "nginx" / "app-routes"
 
 
 def _indent(text: str, spaces: int) -> str:
@@ -44,6 +48,9 @@ def _render_platform_service(definition) -> str:
     if definition.ports:
         lines.append("  ports:")
         lines.extend(f'    - "{port}"' for port in definition.ports)
+    if definition.profiles:
+        lines.append("  profiles:")
+        lines.extend(f'    - "{profile}"' for profile in definition.profiles)
     if definition.volumes:
         lines.append("  volumes:")
         lines.extend(f"    - {_to_compose_volume(volume)}" for volume in definition.volumes)
@@ -79,6 +86,7 @@ def _render_worker_service(definition) -> str:
   restart: unless-stopped
   env_file:
 {env_files}
+{_render_profiles(definition.profiles)}
   depends_on:
     postgres:
       condition: service_healthy
@@ -110,11 +118,19 @@ def _to_compose_volume(volume: str) -> str:
         return volume
     if source.startswith("${") or source.startswith("/") or source.startswith("."):
         return volume
-    return f"{_to_compose_path(source)}:{target}"
+    return f"../../{source}:{target}"
 
 
 def _quote_healthcheck_item(value: str) -> str:
     return f'"{value}"'
+
+
+def _render_profiles(profiles: tuple[str, ...]) -> str:
+    if not profiles:
+        return ""
+    lines = ["  profiles:"]
+    lines.extend(f'    - "{profile}"' for profile in profiles)
+    return "\n".join(lines)
 
 
 def render_compose() -> str:
@@ -139,12 +155,103 @@ def render_compose() -> str:
 def write_compose() -> Path:
     content = render_compose()
     COMPOSE_OUTPUT_PATH.write_text(content, encoding="utf-8")
+    write_nginx_app_routes()
     return COMPOSE_OUTPUT_PATH
 
 
 def check_compose() -> bool:
     current = COMPOSE_OUTPUT_PATH.read_text(encoding="utf-8") if COMPOSE_OUTPUT_PATH.exists() else ""
-    return current == render_compose()
+    return current == render_compose() and check_nginx_app_routes()
+
+
+def write_nginx_app_routes() -> None:
+    if NGINX_APP_ROUTES_OUTPUT_DIR.exists():
+        shutil.rmtree(NGINX_APP_ROUTES_OUTPUT_DIR)
+    for app_name, source in list_app_nginx_route_sources():
+        source_path = PROJECT_ROOT / source
+        output_dir = NGINX_APP_ROUTES_OUTPUT_DIR / app_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for route_path in _iter_nginx_route_files(source_path):
+            (output_dir / route_path.name).write_text(route_path.read_text(encoding="utf-8"), encoding="utf-8")
+    for route in list_app_nginx_route_definitions():
+        app_name = route["app"]
+        output_dir = NGINX_APP_ROUTES_OUTPUT_DIR / app_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_name = route.get("name") or _route_file_name(route["path_prefix"])
+        if not file_name.endswith(".route.conf"):
+            file_name = f"{file_name}.route.conf"
+        (output_dir / file_name).write_text(_render_nginx_route(route), encoding="utf-8")
+
+
+def check_nginx_app_routes() -> bool:
+    for app_name, source in list_app_nginx_route_sources():
+        source_path = PROJECT_ROOT / source
+        output_dir = NGINX_APP_ROUTES_OUTPUT_DIR / app_name
+        for route_path in _iter_nginx_route_files(source_path):
+            output_path = output_dir / route_path.name
+            if not output_path.exists():
+                return False
+            if output_path.read_text(encoding="utf-8") != route_path.read_text(encoding="utf-8"):
+                return False
+    for route in list_app_nginx_route_definitions():
+        output_dir = NGINX_APP_ROUTES_OUTPUT_DIR / route["app"]
+        file_name = route.get("name") or _route_file_name(route["path_prefix"])
+        if not file_name.endswith(".route.conf"):
+            file_name = f"{file_name}.route.conf"
+        output_path = output_dir / file_name
+        if not output_path.exists():
+            return False
+        if output_path.read_text(encoding="utf-8") != _render_nginx_route(route):
+            return False
+    return True
+
+
+def _iter_nginx_route_files(source_path: Path) -> tuple[Path, ...]:
+    if source_path.is_file():
+        return (source_path,) if source_path.name.endswith(".route.conf") else ()
+    if source_path.is_dir():
+        return tuple(sorted(source_path.glob("*.route.conf")))
+    return ()
+
+
+def _render_nginx_route(route: dict) -> str:
+    prefix = route["path_prefix"].rstrip("/") or "/"
+    upstream_service = route["upstream_service"]
+    upstream_port = int(route.get("upstream_port", 8000))
+    variable_name = f"${_safe_nginx_variable(upstream_service)}_upstream"
+    lines = [
+        f"location = {prefix} {{",
+        f"    return 302 {prefix}/;",
+        "}",
+        "",
+        f"location {prefix}/ {{",
+        f"    set {variable_name} http://{upstream_service}:{upstream_port};",
+    ]
+    if route.get("strip_prefix", True):
+        escaped_prefix = re.escape(prefix)
+        lines.append(f"    rewrite ^{escaped_prefix}/(.*)$ /$1 break;")
+    lines.append(f"    proxy_pass {variable_name};")
+    if route.get("proxy_buffering") is False:
+        lines.append("    proxy_buffering off;")
+        lines.append("    proxy_cache off;")
+    lines.extend(
+        [
+            f"    proxy_read_timeout {route.get('proxy_read_timeout', '300s')};",
+            f"    proxy_send_timeout {route.get('proxy_send_timeout', '300s')};",
+            "}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _route_file_name(path_prefix: str) -> str:
+    name = path_prefix.strip("/").replace("/", "-") or "root"
+    return f"{name}.route.conf"
+
+
+def _safe_nginx_variable(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]", "_", value)
 
 
 def main() -> None:

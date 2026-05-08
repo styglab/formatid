@@ -8,10 +8,8 @@ from unittest.mock import patch
 
 if find_spec("psycopg"):
     from apps.g2b_mcp.app.adapters import db
-    from apps.g2b_mcp.app.adapters import live
 else:
     db = None
-    live = None
 
 
 class FakeCursor:
@@ -79,7 +77,15 @@ class G2BMCPTests(unittest.TestCase):
             result = db.search_bids(
                 category="service",
                 keyword="cloud",
+                notice_kind="등록공고",
+                contract_method="일반경쟁",
+                bid_method="전자입찰",
+                bid_notice_no="1",
+                bid_notice_order="000",
                 deadline_to="2026-05-31",
+                opening_from="2026-05-02",
+                demand_org_name="Demand",
+                has_budget=True,
                 min_budget="100,000",
                 limit=5,
                 offset=2,
@@ -101,7 +107,33 @@ class G2BMCPTests(unittest.TestCase):
         rows_params = cursor.calls[1][1]
         self.assertEqual(rows_params[0], "SERVICE")
         self.assertEqual(rows_params[1:4], ("%cloud%", "%cloud%", "%cloud%"))
+        self.assertIn("등록공고", rows_params)
+        self.assertIn("%일반경쟁%", rows_params)
+        self.assertIn("%전자입찰%", rows_params)
+        self.assertIn("1", rows_params)
+        self.assertIn("000", rows_params)
+        self.assertIn("%Demand%", rows_params)
         self.assertEqual(rows_params[-2:], (5, 2))
+
+    def test_search_bids_excludes_cancelled_by_default_and_can_include_them(self) -> None:
+        cursor = FakeCursor()
+
+        with (
+            patch.dict("os.environ", {"G2B_MCP_DATABASE_URL": "postgresql://test"}),
+            patch.object(db.psycopg, "connect", return_value=FakeConnection(cursor)),
+        ):
+            db.search_bids(limit=5)
+
+        self.assertIn("%취소%", cursor.calls[1][1])
+
+        cursor = FakeCursor()
+        with (
+            patch.dict("os.environ", {"G2B_MCP_DATABASE_URL": "postgresql://test"}),
+            patch.object(db.psycopg, "connect", return_value=FakeConnection(cursor)),
+        ):
+            db.search_bids(limit=5, exclude_cancelled=False)
+
+        self.assertNotIn("%취소%", cursor.calls[1][1])
 
     def test_search_bids_rejects_invalid_input_before_connecting(self) -> None:
         with patch.object(db.psycopg, "connect") as connect:
@@ -119,49 +151,21 @@ class G2BMCPTests(unittest.TestCase):
                 db.search_bids(sort_by="title")
         connect.assert_not_called()
 
+    def test_foreign_category_is_valid(self) -> None:
+        cursor = FakeCursor()
+
+        with (
+            patch.dict("os.environ", {"G2B_MCP_DATABASE_URL": "postgresql://test"}),
+            patch.object(db.psycopg, "connect", return_value=FakeConnection(cursor)),
+        ):
+            db.search_bids(category="foreign", limit=5)
+
+        self.assertEqual(cursor.calls[1][1][0], "FOREIGN")
+
     def test_date_only_upper_bound_includes_entire_day(self) -> None:
         parsed = db._parse_datetime("2026-05-31", end_of_day=True)
 
         self.assertEqual(parsed.isoformat(), "2026-05-31T23:59:59+09:00")
-
-    def test_live_search_normalizes_filters_and_paginates_api_results(self) -> None:
-        raw_items = [
-            {
-                "bidNtceNo": "1",
-                "bidNtceOrd": "000",
-                "bidNtceNm": "Cloud migration",
-                "ntceInsttNm": "Seoul Office",
-                "dminsttNm": "Seoul Demand",
-                "presmptPrce": "200,000",
-                "bidNtceDt": "2026-05-01 12:00:00",
-                "bidClseDt": "2026-05-10 18:00:00",
-            },
-            {
-                "bidNtceNo": "2",
-                "bidNtceOrd": "000",
-                "bidNtceNm": "Desk purchase",
-                "ntceInsttNm": "Busan Office",
-                "presmptPrce": "50,000",
-                "bidNtceDt": "2026-05-02 12:00:00",
-                "bidClseDt": "2026-05-11 18:00:00",
-            },
-        ]
-
-        with patch.object(live, "fetch_bids_by_category", return_value=raw_items) as fetch:
-            result = live.search_live_bids(
-                category="SERVICE",
-                keyword="cloud",
-                min_budget="100000",
-                limit=1,
-                offset=0,
-            )
-
-        fetch.assert_called_once_with("SERVICE", published_from=None)
-        self.assertEqual(result["source"], "g2b_api")
-        self.assertEqual(result["count"], 1)
-        self.assertEqual(result["returned"], 1)
-        self.assertEqual(result["bids"][0]["id"], "SERVICE:1:000")
-        self.assertEqual(result["bids"][0]["budget"], 200000)
 
     @unittest.skipUnless(find_spec("fastmcp"), "fastmcp is not installed")
     def test_search_bid_returns_structured_validation_error(self) -> None:
@@ -179,42 +183,6 @@ class G2BMCPTests(unittest.TestCase):
                 }
             },
         )
-
-    @unittest.skipUnless(find_spec("fastmcp"), "fastmcp is not installed")
-    def test_search_bid_falls_back_to_live_api_when_db_is_empty(self) -> None:
-        from apps.g2b_mcp.app.main import search_bid
-
-        db_result = {
-            "source": "normalized_db",
-            "count": 0,
-            "returned": 0,
-            "limit": 10,
-            "offset": 0,
-            "has_more": False,
-            "sort": {"by": "published_at", "order": "desc"},
-            "bids": [],
-        }
-        live_result = {
-            "source": "g2b_api",
-            "count": 1,
-            "returned": 1,
-            "limit": 10,
-            "offset": 0,
-            "has_more": False,
-            "sort": {"by": "published_at", "order": "desc"},
-            "bids": [{"id": "SERVICE:1:000"}],
-        }
-
-        with (
-            patch("apps.g2b_mcp.app.main.search_bids", return_value=db_result) as search_db,
-            patch("apps.g2b_mcp.app.main.search_live_bids", return_value=live_result) as search_live,
-        ):
-            result = search_bid.fn(category="SERVICE")
-
-        search_db.assert_called_once()
-        search_live.assert_called_once()
-        self.assertEqual(result["source"], "g2b_api")
-        self.assertEqual(result["fallback_from"], "normalized_db_empty")
 
 
 if __name__ == "__main__":

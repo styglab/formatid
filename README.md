@@ -295,6 +295,9 @@ LangGraph 기반 app `workflow`는 request/job orchestration을 담당하고, Pr
 `pipeline`은 배치성 데이터 파이프라인이나 운영성 healthcheck flow 같은 독립
 ETL 작업에 사용합니다.
 
+G2B 입찰 수집/정규화처럼 앱 비즈니스 로직을 포함하는 Prefect flow는
+`apps/g2b_pipeline`의 별도 worker와 work pool에서 운영합니다.
+
 Prefect self-hosted stack은 `services/prefect` manifest로 기본 platform service에
 포함됩니다. UI는 `http://localhost:4200`에서 확인할 수 있습니다.
 다른 앱이 Prefect를 사용할 때도 Prefect server/Postgres/Redis를 새로 띄우지
@@ -321,6 +324,18 @@ Prefect API health를 확인합니다.
 ```bash
 docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml exec -T shared-data-pipeline-worker prefect deployment inspect spec-rag-indexing/hourly
 ```
+
+G2B pipeline worker:
+
+```bash
+docker compose --env-file deploy/compose/env/compose.env -f deploy/compose/docker-compose.yml up -d g2b-pipeline-worker
+```
+
+`g2b-bid-realtime-ingest/every-5-minutes`와
+`g2b-bid-initial-ingest/manual` deployment는 `g2b-pipeline-worker` 시작 시
+`apps/g2b_pipeline/app/deployments.py`에서 자동 등록됩니다. MCP는 normalized
+table을 read-only로 조회하고, pipeline은 G2B API 수집과 raw/normalized table
+write를 담당합니다.
 
 ## MCP Test App
 
