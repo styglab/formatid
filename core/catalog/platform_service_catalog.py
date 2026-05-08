@@ -3,7 +3,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from core.catalog.app_catalog import list_required_platform_services
+from core.catalog.app_catalog import (
+    REQUIRED_PLATFORM_SERVICES,
+    list_app_required_platform_service_profiles,
+    list_required_platform_services,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CORE_DIR = PROJECT_ROOT / "core"
@@ -30,6 +34,7 @@ class PlatformServiceDefinition:
     restart: str | None = None
     env_files: tuple[str, ...] = ()
     ports: tuple[str, ...] = ()
+    profiles: tuple[str, ...] = ()
     volumes: tuple[str, ...] = ()
     depends_on_service_healthy: tuple[str, ...] = ()
     healthcheck: HealthcheckDefinition | None = None
@@ -39,6 +44,8 @@ class PlatformServiceDefinition:
 def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
     definitions: list[PlatformServiceDefinition] = []
     service_names: set[str] = set()
+    app_profiles = list_app_required_platform_service_profiles()
+    core_required_services = set(list(REQUIRED_PLATFORM_SERVICES))
 
     for path in _iter_platform_service_manifest_paths():
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -52,6 +59,10 @@ def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
                 retries=int(healthcheck_payload["retries"]),
             )
 
+        manifest_profiles = tuple(payload.get("profiles", []))
+        service_profiles = ()
+        if payload["service_name"] not in core_required_services:
+            service_profiles = app_profiles.get(payload["service_name"], ())
         definition = PlatformServiceDefinition(
             service_name=payload["service_name"],
             service_type=payload.get("service_type", "platform"),
@@ -63,6 +74,7 @@ def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
             restart=payload.get("restart"),
             env_files=tuple(payload.get("env_files", [])),
             ports=tuple(payload.get("ports", [])),
+            profiles=tuple(dict.fromkeys((*manifest_profiles, *service_profiles))),
             volumes=tuple(payload.get("volumes", [])),
             depends_on_service_healthy=tuple(payload.get("depends_on_service_healthy", [])),
             healthcheck=healthcheck,

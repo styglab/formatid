@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.catalog.app_catalog import (
     iter_worker_manifest_paths,
+    list_app_required_worker_profiles,
     list_app_worker_env_files,
     list_required_workers,
     load_json_file,
@@ -21,6 +22,7 @@ class WorkerServiceDefinition:
     queue_name: str
     dockerfile: str
     env_files: tuple[str, ...]
+    profiles: tuple[str, ...] = ()
     replicas: int = 1
 
 
@@ -30,6 +32,7 @@ def _load_available_service_catalog() -> tuple[WorkerServiceDefinition, ...]:
     service_names: set[str] = set()
     queue_names: set[str] = set()
     app_env_files = list_app_worker_env_files()
+    app_profiles = list_app_required_worker_profiles()
 
     for path in iter_worker_manifest_paths():
         raw_payload = load_json_file(path)
@@ -50,6 +53,7 @@ def _load_available_service_catalog() -> tuple[WorkerServiceDefinition, ...]:
                     *tuple(payload.get("env_files", [])),
                     *app_env_files.get(payload["service_name"], ()),
                 ),
+                profiles=tuple(dict.fromkeys((*tuple(payload.get("profiles", [])), *app_profiles.get(payload["service_name"], ())))),
                 replicas=int(payload.get("replicas", 1)),
             )
             if definition.service_name in service_names:

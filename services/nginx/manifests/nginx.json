@@ -1,0 +1,19 @@
+{
+  "service_name": "nginx",
+  "dockerfile": "services/nginx/infra/image/Dockerfile",
+  "build_context": "../..",
+  "restart": "unless-stopped",
+  "ports": [
+    "${NGINX_HOST_PORT:-80}:80"
+  ],
+  "depends_on_service_healthy": [
+    "runtime-api",
+    "runtime-dashboard"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "wget", "-qO-", "http://127.0.0.1/health/ready"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

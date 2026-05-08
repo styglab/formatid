@@ -12,7 +12,7 @@
     "--no-services"
   ],
   "ports": [
-    "${PREFECT_HOST_PORT:-4200}:4200"
+    "${HOST_BIND_IP:-127.0.0.1}:${PREFECT_HOST_PORT:-4200}:4200"
   ],
   "depends_on_service_healthy": [
     "prefect-postgres",

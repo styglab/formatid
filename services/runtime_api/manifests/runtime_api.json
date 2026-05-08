@@ -9,7 +9,7 @@
     "deploy/compose/env/runtime_api.env"
   ],
   "ports": [
-    "${API_HOST_PORT:-8000}:${API_CONTAINER_PORT:-8000}"
+    "${HOST_BIND_IP:-127.0.0.1}:${API_HOST_PORT:-8000}:${API_CONTAINER_PORT:-8000}"
   ],
   "depends_on_service_healthy": [
     "postgres",

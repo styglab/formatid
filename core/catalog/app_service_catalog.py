@@ -13,6 +13,8 @@ def _load_app_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
         payload = load_json_file(path)
         if not isinstance(payload, dict):
             raise RuntimeError(f"invalid app service manifest format: {path}")
+        app_payload = load_json_file(path.parents[1] / "app.json")
+        app_profiles = tuple(app_payload.get("profiles", [])) if isinstance(app_payload, dict) else ()
 
         healthcheck_payload = payload.get("healthcheck")
         healthcheck = None
@@ -35,6 +37,7 @@ def _load_app_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
             restart=payload.get("restart"),
             env_files=tuple(payload.get("env_files", [])),
             ports=tuple(payload.get("ports", [])),
+            profiles=tuple(dict.fromkeys((*app_profiles, *tuple(payload.get("profiles", []))))),
             volumes=tuple(payload.get("volumes", [])),
             depends_on_service_healthy=tuple(payload.get("depends_on_service_healthy", [])),
             healthcheck=healthcheck,

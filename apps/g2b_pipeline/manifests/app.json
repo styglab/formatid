@@ -1,0 +1,14 @@
+{
+  "app": "g2b_pipeline",
+  "description": "G2B Prefect ingest and normalization pipeline app",
+  "profiles": [
+    "g2b-pipeline",
+    "g2b"
+  ],
+  "requires": {
+    "platform_services": [
+      "prefect-server",
+      "prefect-services"
+    ]
+  }
+}

@@ -9,7 +9,7 @@
     "apps/g2b_mcp/infra/env/app.env"
   ],
   "ports": [
-    "${G2B_MCP_HOST_PORT:-8013}:8000"
+    "${HOST_BIND_IP:-127.0.0.1}:${G2B_MCP_HOST_PORT:-8013}:8000"
   ],
   "healthcheck": {
     "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"],

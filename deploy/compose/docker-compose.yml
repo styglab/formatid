@@ -8,7 +8,7 @@ services:
     env_file:
       - ./env/postgres.env
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
     volumes:
       - ${POSTGRES_DATA_DIR:-../../data/postgres}:/var/lib/postgresql/data
       - ../../core/backing/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
-      - "${REDIS_HOST_PORT:-6379}:${REDIS_CONTAINER_PORT:-6379}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:${REDIS_CONTAINER_PORT:-6379}"
     volumes:
       - ../../core/backing/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
@@ -31,25 +31,32 @@ services:
       timeout: 2s
       retries: 10
 
-  embedding:
+  nginx:
     build:
       context: ../..
-      dockerfile: services/embedding/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+      dockerfile: services/nginx/infra/image/Dockerfile
     restart: unless-stopped
     ports:
-      - "${EMBEDDING_HOST_PORT:-8020}:8000"
+      - "${NGINX_HOST_PORT:-80}:80"
+    depends_on:
+      runtime-api:
+        condition: service_healthy
+      runtime-dashboard:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
-      interval: 5s
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health/ready"]
+      interval: 10s
       timeout: 3s
-      retries: 10
+      retries: 5
 
   prefect-postgres:
     image: postgres:14
     restart: unless-stopped
     env_file:
       - ./env/prefect.env
+    profiles:
+      - "g2b-pipeline"
+      - "g2b"
     volumes:
       - ${PREFECT_POSTGRES_DATA_DIR:-../../data/prefect/postgres}:/var/lib/postgresql/data
     healthcheck:
@@ -61,6 +68,9 @@ services:
   prefect-redis:
     image: redis:7
     restart: unless-stopped
+    profiles:
+      - "g2b-pipeline"
+      - "g2b"
     volumes:
       - ${PREFECT_REDIS_DATA_DIR:-../../data/prefect/redis}:/data
     healthcheck:
@@ -76,7 +86,10 @@ services:
     env_file:
       - ./env/prefect.env
     ports:
-      - "${PREFECT_HOST_PORT:-4200}:4200"
+      - "${HOST_BIND_IP:-127.0.0.1}:${PREFECT_HOST_PORT:-4200}:4200"
+    profiles:
+      - "g2b-pipeline"
+      - "g2b"
     depends_on:
       prefect-postgres:
         condition: service_healthy
@@ -94,6 +107,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./env/prefect.env
+    profiles:
+      - "g2b-pipeline"
+      - "g2b"
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -108,7 +124,7 @@ services:
       - ./env/postgres.env
       - ./env/runtime_api.env
     ports:
-      - "${API_HOST_PORT:-8000}:${API_CONTAINER_PORT:-8000}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${API_HOST_PORT:-8000}:${API_CONTAINER_PORT:-8000}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,10 +142,15 @@ services:
       dockerfile: services/runtime_dashboard/infra/image/Dockerfile
     restart: unless-stopped
     ports:
-      - "${DASHBOARD_HOST_PORT:-8080}:${DASHBOARD_CONTAINER_PORT:-80}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${DASHBOARD_HOST_PORT:-8080}:${DASHBOARD_CONTAINER_PORT:-80}"
     depends_on:
       runtime-api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   g2b-mcp:
     build:
@@ -140,142 +161,28 @@ services:
     env_file:
       - ../../apps/g2b_mcp/infra/env/app.env
     ports:
-      - "${G2B_MCP_HOST_PORT:-8013}:8000"
+      - "${HOST_BIND_IP:-127.0.0.1}:${G2B_MCP_HOST_PORT:-8013}:8000"
+    profiles:
+      - "g2b-mcp"
+      - "g2b"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
       interval: 10s
       timeout: 3s
       retries: 5
 
-  shared-data-pipeline-worker:
+  g2b-pipeline-worker:
     build:
       context: ../..
-      dockerfile: apps/shared/data_pipeline/infra/image/Dockerfile
-    command: ["sh", "-c", "prefect work-pool inspect $$PREFECT_WORK_POOL >/dev/null 2>&1 || prefect work-pool create $$PREFECT_WORK_POOL --type process; python -m apps.shared.data_pipeline.app.deployments; prefect worker start --pool $$PREFECT_WORK_POOL"]
+      dockerfile: apps/g2b_pipeline/infra/image/Dockerfile
+    command: ["sh", "-c", "prefect work-pool inspect $$PREFECT_WORK_POOL >/dev/null 2>&1 || prefect work-pool create $$PREFECT_WORK_POOL --type process; python -m apps.g2b_pipeline.app.deployments; prefect worker start --pool $$PREFECT_WORK_POOL"]
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     restart: unless-stopped
     env_file:
-      - ./env/postgres.env
-      - ../../apps/shared/data_pipeline/infra/env/app.env
-      - ../../apps/g2b_mcp/infra/env/app.env
+      - ../../apps/g2b_pipeline/infra/env/app.env
+    profiles:
+      - "g2b-pipeline"
+      - "g2b"
     depends_on:
       prefect-server:
         condition: service_healthy
-      runtime-api:
-        condition: service_healthy
-
-  spec-rag-api:
-    build:
-      context: ../..
-      dockerfile: apps/spec_rag/api/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    ports:
-      - "${SPEC_RAG_API_HOST_PORT:-8012}:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  spec-rag-workflow:
-    build:
-      context: ../..
-      dockerfile: apps/spec_rag/workflow/infra/image/Dockerfile
-    command: ["python", "-m", "apps.spec_rag.workflow.app.service.run_worker"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    depends_on:
-      embedding:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  document-chunk-worker:
-    build:
-      context: ../..
-      dockerfile: services/chunk/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ./env/worker.common.env
-      - ./env/workers/worker.document_chunk.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      replicas: 1
-
-  index-dense-worker:
-    build:
-      context: ../..
-      dockerfile: services/index_dense/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ./env/worker.common.env
-      - ./env/workers/worker.index_dense.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      replicas: 1
-
-  index-sparse-worker:
-    build:
-      context: ../..
-      dockerfile: services/index_sparse/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ./env/worker.common.env
-      - ./env/workers/worker.index_sparse.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      replicas: 1
-
-  document-parser-worker:
-    build:
-      context: ../..
-      dockerfile: services/parser/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ./env/worker.common.env
-      - ./env/workers/worker.document_parser.env
-      - ../../apps/spec_rag/workflow/infra/env/app.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      replicas: 1
