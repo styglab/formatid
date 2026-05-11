@@ -20,9 +20,6 @@ class ServiceRunStore:
         run_name: str,
         status: str,
         service_name: str | None = None,
-        queue_name: str | None = None,
-        task_name: str | None = None,
-        task_id: str | None = None,
         payload: dict[str, Any] | None = None,
         skip_reason: str | None = None,
         details: dict[str, Any] | None = None,
@@ -44,9 +41,6 @@ class ServiceRunStore:
                 INSERT INTO service_runs (
                     service_name,
                     run_name,
-                    task_id,
-                    queue_name,
-                    task_name,
                     status,
                     skip_reason,
                     payload,
@@ -62,16 +56,13 @@ class ServiceRunStore:
                     duration_ms
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                    %s, %s, %s, %s, %s::jsonb, %s::jsonb,
                     %s::jsonb, %s, %s::jsonb, %s, %s, %s, %s, %s, %s
                 )
                 """,
                 (
                     service_name,
                     run_name,
-                    task_id,
-                    queue_name,
-                    task_name,
                     status,
                     skip_reason,
                     json.dumps(payload or {}),

@@ -4,10 +4,7 @@ from scripts.ops.compose import compose
 
 
 G2B_PIPELINE_SERVICES = (
-    "g2b-pipeline-scheduler",
     "g2b-pipeline-worker",
-    "ingest-api-worker",
-    "ingest-file-worker",
 )
 
 

@@ -10,7 +10,6 @@ from core.catalog.app_catalog import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CORE_DIR = PROJECT_ROOT / "core"
 SERVICES_DIR = PROJECT_ROOT / "services"
 
 
@@ -92,9 +91,7 @@ def _load_platform_service_catalog() -> tuple[PlatformServiceDefinition, ...]:
 
 
 def _iter_platform_service_manifest_paths() -> tuple[Path, ...]:
-    core_manifests = sorted(CORE_DIR.glob("**/manifests/*.json"))
-    service_manifests = sorted(_iter_service_manifest_paths())
-    return tuple((*core_manifests, *service_manifests))
+    return _iter_service_manifest_paths()
 
 
 def _iter_service_manifest_paths() -> tuple[Path, ...]:
@@ -105,21 +102,8 @@ def _iter_service_manifest_paths() -> tuple[Path, ...]:
         manifests_dir = service_dir / "manifests"
         if not manifests_dir.is_dir():
             continue
-        if _has_worker_or_task_manifests(manifests_dir):
-            continue
         paths.extend(sorted(manifests_dir.glob("*.json")))
     return tuple(paths)
-
-
-def _has_worker_or_task_manifests(manifests_dir: Path) -> bool:
-    return any(
-        (
-            (manifests_dir / "tasks.json").exists(),
-            (manifests_dir / "queues.json").exists(),
-            (manifests_dir / "workers.json").exists(),
-            (manifests_dir / "workers").exists(),
-        )
-    )
 
 
 def list_platform_service_definitions() -> tuple[PlatformServiceDefinition, ...]:

@@ -7,10 +7,9 @@
 The platform standardizes these identifiers:
 
 - `request_id`: one inbound API request
-- `correlation_id`: cross-surface trace id used across API, graph, and worker execution
-- `run_id`: platform graph run id
-- `thread_id`: LangGraph thread id, always the same value as `run_id`
-- `task_id`: worker task execution id
+- `correlation_id`: cross-surface trace id used across API, pipeline, and service execution
+- `run_id`: platform or pipeline run id
+- `thread_id`: optional long-lived execution thread id
 - `artifact_id`: external stored output id
 - `session_id`: long-lived agent or conversation session id
 

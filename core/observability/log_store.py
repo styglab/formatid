@@ -23,12 +23,10 @@ class ServiceLogStore:
         service_name: str,
         level: str,
         message: str,
-        worker_id: str | None = None,
         event_name: str | None = None,
         logger_name: str | None = None,
         request_id: str | None = None,
         run_name: str | None = None,
-        task_id: str | None = None,
         correlation_id: str | None = None,
         resource_key: str | None = None,
         details: dict[str, Any] | None = None,
@@ -39,21 +37,19 @@ class ServiceLogStore:
             await cursor.execute(
                 """
                 INSERT INTO service_logs (
-                    service_name, worker_id, level, event_name, message, logger_name,
-                    request_id, run_name, task_id, correlation_id, resource_key, details
+                    service_name, level, event_name, message, logger_name,
+                    request_id, run_name, correlation_id, resource_key, details
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (
                     service_name,
-                    worker_id,
                     level.lower(),
                     event_name,
                     message,
                     logger_name,
                     request_id,
                     run_name,
-                    task_id,
                     correlation_id,
                     resource_key,
                     json.dumps(details or {}, ensure_ascii=True, default=str),
@@ -84,12 +80,10 @@ def record_service_log_best_effort(
     level: str,
     message: str,
     database_url: str | None = None,
-    worker_id: str | None = None,
     event_name: str | None = None,
     logger_name: str | None = None,
     request_id: str | None = None,
     run_name: str | None = None,
-    task_id: str | None = None,
     correlation_id: str | None = None,
     resource_key: str | None = None,
     details: dict[str, Any] | None = None,
@@ -102,14 +96,12 @@ def record_service_log_best_effort(
         _record_and_close(
             database_url=database_url or get_checkpoint_database_url(host_default="postgres"),
             service_name=service_name,
-            worker_id=worker_id,
             level=level,
             event_name=event_name,
             message=message,
             logger_name=logger_name,
             request_id=request_id,
             run_name=run_name,
-            task_id=task_id,
             correlation_id=correlation_id,
             resource_key=resource_key,
             details=details,

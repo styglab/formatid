@@ -9,8 +9,6 @@ from core.runtime.runtime_db.schema import (
     ensure_service_logs_table,
     ensure_service_requests_table,
     ensure_service_runs_table,
-    ensure_task_execution_events_table,
-    ensure_task_executions_table,
 )
 from core.runtime.time import now
 
@@ -23,8 +21,6 @@ class ObservabilityPruneResult:
     deleted_service_requests: int
     deleted_service_events: int
     deleted_service_logs: int
-    deleted_task_executions: int
-    deleted_task_execution_events: int
 
     def to_dict(self) -> dict:
         return {
@@ -34,8 +30,6 @@ class ObservabilityPruneResult:
             "deleted_service_requests": self.deleted_service_requests,
             "deleted_service_events": self.deleted_service_events,
             "deleted_service_logs": self.deleted_service_logs,
-            "deleted_task_executions": self.deleted_task_executions,
-            "deleted_task_execution_events": self.deleted_task_execution_events,
         }
 
 
@@ -50,8 +44,6 @@ async def prune_observability(*, database_url: str, retention_days: int) -> Obse
         await ensure_service_requests_table(conn)
         await ensure_service_events_table(conn)
         await ensure_service_logs_table(conn)
-        await ensure_task_executions_table(conn)
-        await ensure_task_execution_events_table(conn)
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "DELETE FROM service_runs WHERE created_at < %s",
@@ -73,16 +65,6 @@ async def prune_observability(*, database_url: str, retention_days: int) -> Obse
                 (cutoff_at,),
             )
             deleted_service_logs = cursor.rowcount
-            await cursor.execute(
-                "DELETE FROM task_executions WHERE updated_at < %s",
-                (cutoff_at,),
-            )
-            deleted_task_executions = cursor.rowcount
-            await cursor.execute(
-                "DELETE FROM task_execution_events WHERE created_at < %s",
-                (cutoff_at,),
-            )
-            deleted_task_execution_events = cursor.rowcount
         await conn.commit()
     finally:
         await conn.close()
@@ -94,6 +76,4 @@ async def prune_observability(*, database_url: str, retention_days: int) -> Obse
         deleted_service_requests=max(deleted_service_requests, 0),
         deleted_service_events=max(deleted_service_events, 0),
         deleted_service_logs=max(deleted_service_logs, 0),
-        deleted_task_executions=max(deleted_task_executions, 0),
-        deleted_task_execution_events=max(deleted_task_execution_events, 0),
     )

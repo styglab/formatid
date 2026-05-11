@@ -1,4 +1,0 @@
-httpx
-psycopg[binary]
-redis
-pydantic

@@ -29,7 +29,9 @@ def build_service_health_report(
     stale_count = sum(1 for entry in entries if entry["health_status"] == "stale")
     down_count = sum(1 for entry in entries if entry["health_status"] == "down")
 
-    if healthy_count > 0:
+    if not entries:
+        status = "not_configured"
+    elif healthy_count > 0:
         status = "healthy"
     elif stale_count > 0:
         status = "degraded"

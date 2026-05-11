@@ -14,14 +14,3 @@ def compose(*args: str, check: bool = True) -> str:
         *args,
         check=check,
     )
-
-
-def compose_run_python(*python_args: str) -> str:
-    return compose(
-        "run",
-        "--rm",
-        "--no-deps",
-        "ingest-api-worker",
-        "python",
-        *python_args,
-    )
