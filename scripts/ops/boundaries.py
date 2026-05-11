@@ -13,7 +13,7 @@ SERVICE_FORBIDDEN_SUBSTRINGS = (
     "g2b_summary",
     "procurement",
 )
-SERVICE_FORBIDDEN_CALLS = ("enqueue_task",)
+SERVICE_FORBIDDEN_CALLS = ()
 CORE_FORBIDDEN_SUBSTRINGS = (
     "G2B_INGEST",
     "PUBLIC_API_KEY",

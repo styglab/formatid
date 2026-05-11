@@ -8,7 +8,6 @@ class ExecutionIdentity(TypedDict, total=False):
     correlation_id: str
     run_id: str
     thread_id: str
-    task_id: str
     resource_key: str
     artifact_id: str
     session_id: str
@@ -25,7 +24,6 @@ def normalize_execution_identity(identity: ExecutionIdentity | None = None, /, *
         "correlation_id",
         "run_id",
         "thread_id",
-        "task_id",
         "resource_key",
         "artifact_id",
         "session_id",

@@ -12,7 +12,6 @@ class Settings:
     log_level: str = "INFO"
     redis_url: str = "redis://localhost:6379/0"
     checkpoint_database_url: str = ""
-    task_status_ttl: int = 604800
     service_lock_enabled: bool = True
     service_lock_ttl_seconds: int = 300
     service_heartbeat_interval: int = 10
@@ -27,11 +26,9 @@ def get_settings() -> Settings:
         log_level=_env("SERVICE_LOG_LEVEL", default="INFO"),
         redis_url=_env(
             "SERVICE_REDIS_URL",
-            "WORKER_REDIS_URL",
             default="redis://localhost:6379/0",
         ),
         checkpoint_database_url=get_checkpoint_database_url(host_default="postgres"),
-        task_status_ttl=int(os.getenv("TASK_STATUS_TTL", "604800")),
         service_lock_enabled=_parse_bool(_env("SERVICE_LOCK_ENABLED", default="true")),
         service_lock_ttl_seconds=int(_env("SERVICE_LOCK_TTL_SECONDS", default="300")),
         service_heartbeat_interval=int(_env("SERVICE_HEARTBEAT_INTERVAL", default="10")),

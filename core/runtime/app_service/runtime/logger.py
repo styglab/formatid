@@ -55,7 +55,6 @@ def log_event(logger: logging.Logger, level: int, event: str, **fields: object) 
         logger_name=logger.name,
         request_id=_string_or_none(fields.get("request_id")),
         run_name=_string_or_none(fields.get("run_name")),
-        task_id=_string_or_none(fields.get("task_id")),
         correlation_id=_string_or_none(fields.get("correlation_id")),
         resource_key=_string_or_none(fields.get("resource_key")),
         details=dict(fields),
