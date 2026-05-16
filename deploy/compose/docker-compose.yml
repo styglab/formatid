@@ -8,7 +8,7 @@ services:
       dockerfile: services/nginx/infra/image/Dockerfile
     restart: unless-stopped
     ports:
-      - "${NGINX_HOST_PORT:-80}:80"
+      - "${NGINX_HOST_PORT:-8081}:80"
     depends_on:
       platform-api:
         condition: service_healthy
@@ -48,7 +48,7 @@ services:
       dockerfile: services/platform_dashboard/infra/image/Dockerfile
     restart: unless-stopped
     ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${DASHBOARD_HOST_PORT:-8080}:${DASHBOARD_CONTAINER_PORT:-80}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${DASHBOARD_HOST_PORT:-3001}:${DASHBOARD_CONTAINER_PORT:-80}"
     depends_on:
       platform-api:
         condition: service_healthy
@@ -60,11 +60,12 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    command: ["postgres", "-c", "timezone=Asia/Seoul"]
     restart: unless-stopped
     env_file:
       - ./env/postgres.env
     ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
     volumes:
       - ${POSTGRES_DATA_DIR:-../../data/postgres}:/var/lib/postgresql/data
       - ../../services/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -82,6 +83,8 @@ services:
     profiles:
       - "g2b-pipeline"
       - "g2b"
+      - "semantic_platform"
+      - "pubdata"
     volumes:
       - ${PREFECT_POSTGRES_DATA_DIR:-../../data/prefect/postgres}:/var/lib/postgresql/data
     healthcheck:
@@ -96,6 +99,8 @@ services:
     profiles:
       - "g2b-pipeline"
       - "g2b"
+      - "semantic_platform"
+      - "pubdata"
     volumes:
       - ${PREFECT_REDIS_DATA_DIR:-../../data/prefect/redis}:/data
     healthcheck:
@@ -115,6 +120,8 @@ services:
     profiles:
       - "g2b-pipeline"
       - "g2b"
+      - "semantic_platform"
+      - "pubdata"
     depends_on:
       prefect-postgres:
         condition: service_healthy
@@ -135,6 +142,8 @@ services:
     profiles:
       - "g2b-pipeline"
       - "g2b"
+      - "semantic_platform"
+      - "pubdata"
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -143,7 +152,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:${REDIS_CONTAINER_PORT:-6379}"
+      - "${HOST_BIND_IP:-127.0.0.1}:${REDIS_HOST_PORT:-6380}:${REDIS_CONTAINER_PORT:-6379}"
     volumes:
       - ../../services/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
@@ -151,6 +160,62 @@ services:
       interval: 2s
       timeout: 2s
       retries: 10
+
+  semantic-platform-api:
+    build:
+      context: ../..
+      dockerfile: services/semantic_platform/api/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ../../services/semantic_platform/api/infra/env/app.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_API_HOST_PORT:-8016}:8000"
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  semantic-platform-dashboard:
+    build:
+      context: ../..
+      dockerfile: services/semantic_platform/dashboard/infra/image/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_DASHBOARD_HOST_PORT:-3016}:80"
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    depends_on:
+      semantic-platform-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  semantic-platform-worker:
+    build:
+      context: ../..
+      dockerfile: services/semantic_platform/worker/infra/image/Dockerfile
+    command: ["sh", "-c", "prefect work-pool inspect $$PREFECT_WORK_POOL >/dev/null 2>&1 || prefect work-pool create $$PREFECT_WORK_POOL --type process; python -m services.semantic_platform.worker.deployments; prefect worker start --pool $$PREFECT_WORK_POOL"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ../../services/semantic_platform/worker/infra/env/app.env
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    volumes:
+      - ../../sources:/app/sources
+    depends_on:
+      prefect-server:
+        condition: service_healthy
 
   g2b-mcp:
     build:
@@ -186,3 +251,25 @@ services:
     depends_on:
       prefect-server:
         condition: service_healthy
+
+  pubdata-mcp:
+    build:
+      context: ../..
+      dockerfile: apps/pubdata_mcp/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ../../apps/pubdata_mcp/infra/env/app.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${PUBDATA_MCP_HOST_PORT:-8015}:8000"
+    profiles:
+      - "pubdata-mcp"
+      - "pubdata"
+    depends_on:
+      semantic-platform-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

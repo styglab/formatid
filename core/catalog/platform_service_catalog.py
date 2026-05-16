@@ -102,7 +102,7 @@ def _iter_service_manifest_paths() -> tuple[Path, ...]:
         manifests_dir = service_dir / "manifests"
         if not manifests_dir.is_dir():
             continue
-        paths.extend(sorted(manifests_dir.glob("*.json")))
+        paths.extend(path for path in sorted(manifests_dir.glob("*.json")) if path.name != "app.json")
     return tuple(paths)
 
 

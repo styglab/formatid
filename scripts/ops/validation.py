@@ -137,6 +137,9 @@ def validate_config() -> dict:
 
 def _app_name_from_manifest_path(path) -> str:
     app_dir = path.parent.parent
+    services_dir = PROJECT_ROOT / "services"
+    if app_dir.is_relative_to(services_dir):
+        return ".".join(app_dir.relative_to(services_dir).parts)
     return ".".join(app_dir.relative_to(PROJECT_ROOT / "apps").parts)
 
 

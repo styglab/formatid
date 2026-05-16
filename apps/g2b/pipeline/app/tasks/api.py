@@ -47,6 +47,35 @@ def fetch_g2b_items(url: str, window: G2BIngestWindow) -> list[dict[str, Any]]:
     return records
 
 
+def fetch_g2b_query_items(url: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    api_key = os.getenv("G2B_API_KEY") or os.getenv("API_KEY")
+    if not api_key:
+        raise RuntimeError("G2B_API_KEY is not configured")
+
+    page_no = 1
+    num_of_rows = int(params.get("numOfRows") or os.getenv("G2B_INGEST_NUM_OF_ROWS", "100"))
+    records: list[dict[str, Any]] = []
+    base_params = {**params, "ServiceKey": api_key, "numOfRows": num_of_rows, "type": "json"}
+
+    while True:
+        payload = _get_json(url, {**base_params, "pageNo": page_no})
+        _raise_for_g2b_error(payload)
+        body = payload.get("response", {}).get("body", {})
+        page_items = _coerce_items(body.get("items", []))
+        records.extend(page_items)
+
+        total_count = parse_count(body.get("totalCount"))
+        if not page_items:
+            break
+        if total_count is not None and len(records) >= total_count:
+            break
+        if len(page_items) < num_of_rows:
+            break
+        page_no += 1
+
+    return records
+
+
 def _coerce_items(items: Any) -> list[dict[str, Any]]:
     if isinstance(items, list):
         return [item for item in items if isinstance(item, dict)]

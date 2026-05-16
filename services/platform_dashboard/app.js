@@ -17,8 +17,8 @@ async function fetchJson(url) {
 function App() {
   const [summary, setSummary] = useState(null);
   const [apps, setApps] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [selectedApp, setSelectedApp] = useState(null);
+  const [activeView, setActiveView] = useState("platform");
+  const [refreshMs, setRefreshMs] = useState(10000);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,16 +26,14 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const [summaryRes, appsRes, logsRes] = await Promise.all([
+      const [summaryRes, appsRes] = await Promise.all([
         fetchJson("/api/dashboard/summary"),
         fetchJson("/api/dashboard/apps"),
-        fetchJson("/api/logs/services"),
       ]);
       const nextApps = appsRes.apps || [];
       setSummary(summaryRes);
       setApps(nextApps);
-      setLogs(logsRes.sources || []);
-      setSelectedApp((current) => current || nextApps[0]?.app || null);
+      setActiveView((current) => current || "platform");
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -45,14 +43,19 @@ function App() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 10000);
-    return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!refreshMs) return undefined;
+    const id = setInterval(load, refreshMs);
+    return () => clearInterval(id);
+  }, [refreshMs]);
+
   const currentApp = useMemo(
-    () => apps.find((app) => app.app === selectedApp) || apps[0] || null,
-    [apps, selectedApp]
+    () => apps.find((app) => app.app === activeView) || apps[0] || null,
+    [apps, activeView]
   );
+  const isPlatformView = activeView === "platform";
 
   return React.createElement("div", { className: "app" },
     React.createElement("header", { className: "topbar" },
@@ -61,28 +64,33 @@ function App() {
         React.createElement("div", { className: "subtitle" }, formatDateTime(summary?.evaluated_at) || "Loading")
       ),
       React.createElement("div", { className: "toolbar" },
+        React.createElement("select", {
+          className: "select",
+          value: String(refreshMs),
+          onChange: (event) => setRefreshMs(Number(event.target.value)),
+          "aria-label": "Refresh interval",
+        },
+          React.createElement("option", { value: "0" }, "Auto refresh off"),
+          React.createElement("option", { value: "10000" }, "Refresh 10s"),
+          React.createElement("option", { value: "30000" }, "Refresh 30s"),
+          React.createElement("option", { value: "60000" }, "Refresh 60s")
+        ),
         React.createElement("button", { className: "btn", onClick: load, disabled: loading }, loading ? "Refreshing" : "Refresh")
       )
     ),
     React.createElement("div", { className: "shell" },
-      React.createElement(Sidebar, { apps, selectedApp: currentApp?.app, onSelect: setSelectedApp }),
+      React.createElement(Sidebar, { apps, activeView, onSelect: setActiveView }),
       React.createElement("main", { className: "main grid" },
         error && React.createElement("div", { className: "error" }, error),
-        React.createElement(PlatformOverview, { summary, apps }),
-        React.createElement("section", { className: "grid app-overview" },
-          React.createElement(AppSummaryCard, { app: currentApp }),
-          React.createElement(LogSourcesCard, { sources: logs })
-        ),
-        React.createElement("section", { className: "grid two-col" },
-          React.createElement(ServiceRunsCard, { serviceRuns: summary?.service_runs || [] }),
-          React.createElement(AppSectionsCard, { app: currentApp })
-        )
+        isPlatformView
+          ? React.createElement(PlatformView, { summary, apps })
+          : React.createElement(AppView, { app: currentApp })
       )
     )
   );
 }
 
-function Sidebar({ apps, selectedApp, onSelect }) {
+function Sidebar({ apps, activeView, onSelect }) {
   return React.createElement("aside", { className: "sidebar" },
     React.createElement("div", { className: "side-brand" },
       React.createElement("div", { className: "brand-mark" }, "F"),
@@ -91,12 +99,20 @@ function Sidebar({ apps, selectedApp, onSelect }) {
         React.createElement("div", { className: "brand-caption" }, "AI-ready data platform")
       )
     ),
+    React.createElement("button", {
+      className: `nav-item ${activeView === "platform" ? "active" : ""}`,
+      onClick: () => onSelect("platform"),
+    },
+      React.createElement("span", { className: "nav-icon" }, "P"),
+      React.createElement("span", { className: "nav-label" }, "Platform"),
+      React.createElement("span", { className: "nav-status healthy" })
+    ),
     React.createElement("div", { className: "side-section" }, "Apps"),
     apps.length === 0
       ? React.createElement("div", { className: "side-empty" }, "No app dashboards")
       : apps.map((app) =>
           React.createElement("button", {
-            className: `nav-item ${selectedApp === app.app ? "active" : ""}`,
+            className: `nav-item ${activeView === app.app ? "active" : ""}`,
             key: app.app,
             onClick: () => onSelect(app.app),
           },
@@ -108,84 +124,91 @@ function Sidebar({ apps, selectedApp, onSelect }) {
   );
 }
 
-function PlatformOverview({ summary, apps }) {
-  const appServices = summary?.app_services || {};
-  return React.createElement("section", { className: "grid runtime-kpis" },
-    React.createElement(Kpi, { label: "Platform", value: summary?.health?.status || "unknown", badge: summary?.health?.status || "unknown" }),
-    React.createElement(Kpi, { label: "Redis", value: summary?.health?.redis?.ok ? "ok" : "down", badge: summary?.health?.redis?.ok ? "healthy" : "failed" }),
-    React.createElement(Kpi, { label: "App Heartbeats", value: appServices.service_count ?? 0, badge: appServices.status || "unknown" }),
-    React.createElement(Kpi, { label: "Dashboards", value: apps.length, badge: apps.length ? "healthy" : "unknown" }),
-    React.createElement(Kpi, { label: "Service Runs", value: summary?.service_runs?.length ?? 0, badge: "queued" }),
-    React.createElement(Kpi, { label: "Updated", value: shortTime(summary?.evaluated_at), detail: summary?.evaluated_at || "-" })
+function PlatformView({ summary, apps }) {
+  const services = summary?.service_health || [];
+  const platformServices = services.filter((service) => service.scope !== "app");
+  const appServices = services.filter((service) => service.scope === "app");
+  const platformHealthy = platformServices.filter((service) => service.status === "healthy").length;
+  const appHealthy = appServices.filter((service) => service.status === "healthy").length;
+
+  return React.createElement(DashboardPage, {
+    leftKpis: [
+      { label: "Platform Services", value: platformServices.length },
+      { label: "Platform Healthy", value: platformHealthy, detail: `${platformServices.length - platformHealthy} unhealthy` },
+    ],
+    rightKpis: [
+      { label: "App Services", value: appServices.length },
+      { label: "App Healthy", value: appHealthy, detail: `${appServices.length - appHealthy} unhealthy` },
+    ],
+    leftCard: React.createElement(ServiceHealthCard, { title: "Platform Services", services: platformServices }),
+    rightCard: React.createElement(ServiceHealthCard, { title: "App Services", services: appServices }),
+  });
+}
+
+function AppView({ app }) {
+  const dataTableSection = findSection(app, "Data Tables");
+  const pipelineSection = findSection(app, "Pipeline Runs");
+  const metrics = Array.isArray(app?.metrics) ? app.metrics : [];
+
+  return React.createElement(React.Fragment, null,
+    app?.error && React.createElement("div", { className: "error" }, app.error),
+    React.createElement(DashboardPage, {
+      leftKpis: metrics.slice(0, 2),
+      rightKpis: metrics.slice(2, 4),
+      leftCard: React.createElement(DataTablesCard, { section: dataTableSection }),
+      rightCard: React.createElement(PipelineRunsCard, { section: pipelineSection }),
+    })
   );
 }
 
-function AppSummaryCard({ app }) {
-  if (!app) {
-    return React.createElement(Card, { title: "App Summary" },
-      React.createElement("div", { className: "muted" }, "No app dashboard registered")
-    );
-  }
-  const metrics = Array.isArray(app.metrics) ? app.metrics : [];
-  return React.createElement(Card, {
-    title: app.title || app.app,
-    action: React.createElement("span", { className: `badge ${app.status || "unknown"}` }, app.status || "unknown"),
-  },
-    app.description && React.createElement("div", { className: "muted card-intro" }, app.description),
-    app.error && React.createElement("div", { className: "error" }, app.error),
-    metrics.length === 0
-      ? React.createElement("div", { className: "muted" }, "No metrics")
-      : React.createElement("div", { className: "grid app-metrics" },
-          metrics.map((metric) =>
-            React.createElement("div", { className: "metric-tile", key: metric.label },
-              React.createElement("div", { className: "kpi-label" }, metric.label),
-              React.createElement("div", { className: "kpi-value" }, formatValue(metric.value)),
-              metric.detail && React.createElement("div", { className: "kpi-detail" }, formatDateTime(metric.detail))
-            )
-          )
-        )
+function DashboardPage({ leftKpis, rightKpis, leftCard, rightCard }) {
+  return React.createElement("section", { className: "dashboard-page" },
+    React.createElement(DashboardKpis, { leftKpis, rightKpis }),
+    React.createElement("section", { className: "grid dashboard-layout" }, leftCard, rightCard)
   );
 }
 
-function AppSectionsCard({ app }) {
-  const sections = Array.isArray(app?.sections) ? app.sections : [];
-  return React.createElement(Card, { title: "App Sections" },
-    sections.length === 0
-      ? React.createElement("div", { className: "muted" }, "No sections")
-      : React.createElement("div", { className: "section-stack" },
-          sections.map((section) =>
-            React.createElement("section", { className: "summary-section", key: section.title },
-              React.createElement("h3", null, section.title),
-              React.createElement("div", { className: "metric-stack" },
-                (section.rows || []).map((row) =>
-                  React.createElement("div", { className: "metric-line", key: row.name },
-                    React.createElement("span", null, row.name),
-                    React.createElement("strong", null, formatDisplayValue(row.value))
-                  )
-                )
-              )
-            )
-          )
-        )
+function DashboardKpis({ leftKpis, rightKpis }) {
+  return React.createElement("section", { className: "grid paired-kpis" },
+    React.createElement("div", { className: "grid kpi-pair" },
+      leftKpis.map((metric) =>
+        React.createElement(Kpi, {
+          key: metric.label,
+          label: metric.label,
+          value: metric.value,
+          detail: metric.detail,
+        })
+      )
+    ),
+    React.createElement("div", { className: "grid kpi-pair" },
+      rightKpis.map((metric) =>
+        React.createElement(Kpi, {
+          key: metric.label,
+          label: metric.label,
+          value: metric.value,
+          detail: metric.detail,
+        })
+      )
+    )
   );
 }
 
-function ServiceRunsCard({ serviceRuns }) {
-  return React.createElement(Card, { title: "Service Runs" },
-    serviceRuns.length === 0
-      ? React.createElement("div", { className: "muted" }, "No service runs")
+function DataTablesCard({ section }) {
+  const rows = Array.isArray(section?.rows) ? section.rows : [];
+  return React.createElement(Card, { title: "Data Tables" },
+    rows.length === 0
+      ? React.createElement("div", { className: "muted" }, "No table stats")
       : React.createElement("div", { className: "table-wrap" },
           React.createElement("table", { className: "dense-table" },
             React.createElement("thead", null,
-              React.createElement("tr", null, ["Name", "Status", "Last run", "Duration"].map((text) => React.createElement("th", { key: text }, text)))
+              React.createElement("tr", null, ["Table", "Rows", "Freshness"].map((text) => React.createElement("th", { key: text }, text)))
             ),
             React.createElement("tbody", null,
-              serviceRuns.map((run) =>
-                React.createElement("tr", { key: run.name },
-                  React.createElement("td", { className: "wrap" }, run.name),
-                  React.createElement("td", null, React.createElement("span", { className: `badge ${run.last_run?.status || "unknown"}` }, run.last_run?.status || "unknown")),
-                  React.createElement("td", { className: "muted" }, formatDateTime(run.last_run?.created_at)),
-                  React.createElement("td", { className: "muted" }, run.last_run?.duration_ms == null ? "-" : `${Math.round(run.last_run.duration_ms)} ms`)
+              rows.map((row) =>
+                React.createElement("tr", { key: row.name },
+                  React.createElement("td", { className: "wrap" }, row.name),
+                  React.createElement("td", null, formatValue(row.value)),
+                  React.createElement("td", { className: "muted" }, formatDateTime(row.freshness))
                 )
               )
             )
@@ -194,16 +217,48 @@ function ServiceRunsCard({ serviceRuns }) {
   );
 }
 
-function LogSourcesCard({ sources }) {
-  return React.createElement(Card, { title: "Log Sources" },
-    sources.length === 0
-      ? React.createElement("div", { className: "muted" }, "No log sources")
-      : React.createElement("div", { className: "health-list" },
-          sources.map((source) =>
-            React.createElement("div", { className: "health-row", key: source.service_name },
-              React.createElement("span", { className: "health-name" }, source.service_name),
-              React.createElement("span", { className: `badge ${source.status || "unknown"}` }, source.status || "logged"),
-              React.createElement("span", { className: "muted" }, formatDateTime(source.last_seen_at))
+function PipelineRunsCard({ section }) {
+  const rows = Array.isArray(section?.rows) ? section.rows : [];
+  return React.createElement(Card, { title: "Pipeline Runs" },
+    rows.length === 0
+      ? React.createElement("div", { className: "muted" }, "No pipeline runs")
+      : React.createElement("div", { className: "table-wrap" },
+          React.createElement("table", { className: "dense-table" },
+            React.createElement("thead", null,
+              React.createElement("tr", null, ["Pipeline", "Status", "Last run"].map((text) => React.createElement("th", { key: text }, text)))
+            ),
+            React.createElement("tbody", null,
+              rows.map((row) =>
+                React.createElement("tr", { key: row.name },
+                  React.createElement("td", { className: "wrap" }, row.name),
+                  React.createElement("td", null, React.createElement("span", { className: `badge ${String(row.value || "unknown").toLowerCase()}` }, row.value || "unknown")),
+                  React.createElement("td", { className: "muted" }, formatDateTime(row.last_run_at))
+                )
+              )
+            )
+          )
+        )
+  );
+}
+
+function ServiceHealthCard({ title, services }) {
+  return React.createElement(Card, { title },
+    services.length === 0
+      ? React.createElement("div", { className: "muted" }, "No service health checks")
+      : React.createElement("div", { className: "table-wrap" },
+          React.createElement("table", { className: "dense-table" },
+            React.createElement("thead", null,
+              React.createElement("tr", null, ["Service", "Status", "Address", "Role"].map((text) => React.createElement("th", { key: text }, text)))
+            ),
+            React.createElement("tbody", null,
+              services.map((service) =>
+                React.createElement("tr", { key: service.service },
+                  React.createElement("td", { className: "wrap" }, service.service),
+                  React.createElement("td", null, React.createElement("span", { className: `badge ${service.status || "unknown"}` }, service.status || "unknown")),
+                  React.createElement("td", { className: "muted wrap" }, service.address || service.detail || "-"),
+                  React.createElement("td", { className: "muted wrap" }, service.role || service.kind || "-")
+                )
+              )
             )
           )
         )
@@ -219,8 +274,8 @@ function Kpi({ label, value, badge, detail }) {
   );
 }
 
-function Card({ title, action, children }) {
-  return React.createElement("div", { className: "card" },
+function Card({ title, action, children, className }) {
+  return React.createElement("div", { className: className ? `card ${className}` : "card" },
     React.createElement("div", { className: "card-head" },
       React.createElement("div", { className: "card-title" }, title),
       action
@@ -238,6 +293,11 @@ function formatValue(value) {
 function formatDisplayValue(value) {
   if (looksLikeIsoDate(value)) return formatDateTime(value);
   return formatValue(value);
+}
+
+function findSection(app, title) {
+  const sections = Array.isArray(app?.sections) ? app.sections : [];
+  return sections.find((section) => section.title === title) || null;
 }
 
 function formatDateTime(value) {

@@ -1,0 +1,49 @@
+relations:
+
+  CalendarEvent_OCCURS_ON_Date:
+    source: CalendarEvent
+    predicate: OCCURS_ON
+    target: Date
+    capabilities: [get_special_day]
+
+  Organization_IDENTIFIED_BY_Identifier:
+    source: Organization
+    predicate: IDENTIFIED_BY
+    target: Identifier
+    capabilities: [check_business_status, validate_business_registration]
+
+  Parcel_LOCATED_IN_Location:
+    source: Parcel
+    predicate: LOCATED_IN
+    target: Location
+    capabilities: [get_cadastral_features]
+
+  Location_HAS_WeatherObservation:
+    source: Location
+    predicate: HAS
+    target: WeatherObservation
+    capabilities: [get_asos_hourly_observation]
+
+  Organization_HAS_FinancialStatement:
+    source: Organization
+    predicate: HAS
+    target: FinancialStatement
+    capabilities: [get_financial_summary, get_income_statement]
+
+  Organization_ISSUED_Contract:
+    source: Organization
+    predicate: ISSUED
+    target: Contract
+    capabilities: [get_procurement_contract_detail, search_procurement_contracts, search_procurement_contracts_by_conditions]
+
+  Organization_WON_Contract:
+    source: Organization
+    predicate: WON
+    target: Contract
+    capabilities: [get_procurement_contract_detail, search_procurement_contracts, search_procurement_contracts_by_conditions]
+
+  Location_HAS_AirQualityObservation:
+    source: Location
+    predicate: HAS
+    target: AirQualityObservation
+    capabilities: [get_air_quality_realtime]

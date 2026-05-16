@@ -1,0 +1,144 @@
+name: pubdata-mcp
+title: Public Data MCP
+description: Public-data MCP examples that call external APIs directly.
+tools:
+  - name: search_pps_bid_notices_live
+    description: >
+      Search PPS/G2B bid notices by calling the public API directly. This tool does
+      not use normalized tables, cached rows, or semantic enrichment.
+    handler: apps.pubdata_mcp.app.providers.pps.tools.search_bid_notices
+    input:
+      required:
+        - category
+        - date_from
+        - date_to
+      fields:
+        category:
+          type: string
+          description: GOODS, SERVICE, CONSTRUCTION, FOREIGN, or Korean aliases 물품/용역/공사/외자.
+        date_from:
+          type: string
+          description: Inquiry start date. Accepts YYYYMMDD, YYYYMMDDHHMM, or ISO-like date.
+        date_to:
+          type: string
+          description: Inquiry end date. Accepts YYYYMMDD, YYYYMMDDHHMM, or ISO-like date.
+        keyword:
+          type: string
+          description: Optional bid notice title keyword.
+        page_no:
+          type: integer
+          default: 1
+        num_of_rows:
+          type: integer
+          default: 10
+    semantics:
+      returns: RawPPSBidNoticePage
+      date_semantics:
+        registration_datetime: inqryBgnDt/inqryEndDt
+    evidence:
+      source: PPS/G2B public API
+      storage: none
+
+  - name: search_pps_contracts_live
+    description: >
+      Search PPS/G2B contracts by calling the public API directly. Use this for
+      contract-date questions when raw public API results are enough.
+    handler: apps.pubdata_mcp.app.providers.pps.tools.search_contracts
+    input:
+      required:
+        - category
+        - contract_date_from
+        - contract_date_to
+      fields:
+        category:
+          type: string
+          description: GOODS, SERVICE, CONSTRUCTION, FOREIGN, or Korean aliases 물품/용역/공사/외자.
+        contract_date_from:
+          type: string
+          description: Contract date start. Accepts YYYYMMDD or ISO-like date.
+        contract_date_to:
+          type: string
+          description: Contract date end. Accepts YYYYMMDD or ISO-like date.
+        keyword:
+          type: string
+          description: Optional contract name keyword.
+        page_no:
+          type: integer
+          default: 1
+        num_of_rows:
+          type: integer
+          default: 10
+    semantics:
+      returns: RawPPSContractPage
+      date_semantics:
+        contract_date: inqryBgnDate/inqryEndDate
+    response:
+      item:
+        keep_raw: true
+        normalized:
+          unified_contract_no:
+            catalog_field: unified_contract_no
+            path: untyCntrctNo
+            type: string
+          decision_contract_no:
+            catalog_field: decision_contract_no
+            path: dcsnCntrctNo
+            type: string
+          contract_name:
+            catalog_field: contract_name
+            path: cntrctNm
+            type: string
+          category_label:
+            path: bsnsDivNm
+            type: string
+          contract_date:
+            catalog_field: contract_date
+            path: cntrctDate
+            type: date
+          contract_concluded_date:
+            catalog_field: contract_concluded_date
+            path: cntrctCnclsDate
+            type: date
+          current_contract_amount:
+            catalog_field: current_contract_amount
+            path: thtmCntrctAmt
+            type: integer
+          total_contract_amount:
+            catalog_field: total_contract_amount
+            path: totCntrctAmt
+            type: integer
+          contract_method:
+            catalog_field: contract_method
+            path: cntrctCnclsMthdNm
+            type: string
+          contract_org_code:
+            path: cntrctInsttCd
+            type: string
+          contract_org_name:
+            catalog_field: contract_org_name
+            path: cntrctInsttNm
+            type: string
+          contract_companies:
+            catalog_field: contract_companies
+            parser: apps.pubdata_mcp.app.providers.pps.parsers.contract_companies
+            type: array
+          demand_organizations:
+            catalog_field: demand_organizations
+            parser: apps.pubdata_mcp.app.providers.pps.parsers.demand_organizations
+            type: array
+          bid_notice_no:
+            path: ntceNo
+            type: string
+          registered_at:
+            path: rgstDt
+            type: datetime
+          changed_at:
+            path: chgDt
+            type: datetime
+          is_info_business:
+            path: infoBizYn
+            type: boolean
+    evidence:
+      source: PPS/G2B public API
+      storage: none
+      date_basis: contract_date

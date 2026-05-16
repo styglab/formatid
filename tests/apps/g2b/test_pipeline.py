@@ -12,6 +12,10 @@ from apps.g2b.pipeline.app.steps.bid_notices import (
     CATEGORY_LABELS,
     compute_realtime_window_value,
 )
+from apps.g2b.pipeline.app.steps.companies import (
+    normalize_company_basic_raw_row,
+    normalize_company_industry_raw_row,
+)
 from apps.g2b.pipeline.app.steps.license_limits import (
     normalize_license_limit_raw_row,
     parse_main_field_groups,
@@ -23,11 +27,11 @@ from apps.g2b.pipeline.app.steps.success_bids import (
     normalize_success_bid_raw_row,
     success_bid_resource_key,
 )
-from apps.g2b.pipeline.app.semantic.bid_notices import (
+from apps.g2b.semantic import (
     build_bid_notice_semantic_document,
     build_bid_notice_semantic_object,
 )
-from apps.g2b.ontology import Relationship, SemanticTag
+from apps.g2b.semantic import Relationship, SemanticTag
 
 if find_spec("prefect"):
     from apps.g2b.pipeline.app.service import ingest
@@ -96,6 +100,53 @@ class G2BBidPipelineTests(unittest.TestCase):
         self.assertEqual(normalized["participant_count"], 8)
         self.assertEqual(str(normalized["winning_amount"]), "1195917660")
         self.assertEqual(str(normalized["winning_rate"]), "87.836")
+
+    def test_company_basic_raw_row_is_normalized(self) -> None:
+        row = {
+            "id": 1,
+            "raw_payload": {
+                "bizno": "1168170775",
+                "corpNm": "주식회사 솔리데오",
+                "engCorpNm": "Solideo Co., Ltd",
+                "opbizDt": "1998-12-15 00:00:00",
+                "rgnCd": "11560",
+                "rgnNm": "서울특별시 영등포구",
+                "emplyeNum": "271",
+                "corpBsnsDivCd": "01,03,05,07",
+                "corpBsnsDivNm": "물품,일반용역,용역,공사",
+                "chgDt": "2026-04-18 07:00:36",
+                "ceoNm": "김숙희",
+            },
+        }
+
+        normalized = normalize_company_basic_raw_row(row)
+
+        self.assertEqual(normalized["business_no"], "1168170775")
+        self.assertEqual(normalized["company_name"], "주식회사 솔리데오")
+        self.assertEqual(normalized["region_name"], "서울특별시 영등포구")
+        self.assertEqual(normalized["employee_count"], 271)
+        self.assertEqual(normalized["business_division_names"], ["물품", "일반용역", "용역", "공사"])
+
+    def test_company_industry_raw_row_is_normalized(self) -> None:
+        row = {
+            "id": 2,
+            "raw_payload": {
+                "bizno": "1168170775",
+                "indstrytyNm": "소프트웨어사업자(컴퓨터관련서비스사업)",
+                "indstrytyCd": "1468",
+                "rgstDt": "2026-04-17 00:00:00",
+                "vldPrdExprtDt": "2099-12-31 00:00:00",
+                "indstrytyStatsNm": "정상",
+                "rprsntIndstrytyYn": "Y",
+            },
+        }
+
+        normalized = normalize_company_industry_raw_row(row)
+
+        self.assertEqual(normalized["business_no"], "1168170775")
+        self.assertEqual(normalized["industry_code"], "1468")
+        self.assertTrue(normalized["is_representative"])
+        self.assertEqual(normalized["status_name"], "정상")
 
     def test_license_limit_lists_are_parsed(self) -> None:
         self.assertEqual(
@@ -343,14 +394,14 @@ class G2BBidPipelineTests(unittest.TestCase):
             patch.object(ingest, "g2b_bid_ingest_run_lock", locked),
             patch.object(ingest, "_ingest_notice_raw") as ingest_notice_raw,
         ):
-            result = ingest.process_realtime_window(
+            result = ingest.process_5min_window(
                 {"begin": "202605010000", "end": "202605010005"},
                 use_prefect_tasks=False,
             )
 
         ingest_notice_raw.assert_not_called()
         self.assertEqual(result["skipped"], True)
-        self.assertEqual(result["flow"], "g2b-bid-realtime-ingest")
+        self.assertEqual(result["flow"], "g2b-bid-5min-ingest")
 
 
 if __name__ == "__main__":

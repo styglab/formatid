@@ -1,6 +1,10 @@
 # g2b/mcp
 
-G2B bid search MCP prototype.
+G2B procurement MCP.
+
+The MCP app is intentionally thin. Domain queries live in
+`apps/g2b/domain/procurement`, semantic metadata lives in `apps/g2b/semantic`,
+and this app only loads MCP tool specs from YAML.
 
 ## Service
 
@@ -11,15 +15,29 @@ G2B bid search MCP prototype.
 
 ## Tools
 
-- `search_bid(category=None, keyword=None, notice_kind=None, exclude_cancelled=True, contract_method=None, bid_method=None, bid_notice_no=None, bid_notice_order=None, published_from=None, published_to=None, deadline_from=None, deadline_to=None, opening_from=None, opening_to=None, organization_name=None, demand_org_name=None, has_budget=None, min_budget=None, max_budget=None, limit=10, offset=0, sort_by="published_at", sort_order="desc")`
+Tool contracts are declared in:
+
+- `apps/g2b/mcp/tools.yaml`
+
+The YAML file defines each tool name, input fields, semantic hints, evidence
+metadata, and the Python domain handler to call.
+
+- `search_bid(...)`
+- `search_success_bid(...)`
+- `search_contract(...)`
+- `get_bid_context(bid_notice_no, bid_notice_order=None, category=None)`
+- `get_procurement_lifecycle(bid_notice_no, bid_notice_order=None, category=None)`
+- `get_tool_capabilities()`
 
 `category` accepts:
 
 - `SERVICE`
 - `GOODS`
 - `CONSTRUCTION`
+- `FOREIGN`
 
-`search_bid` queries the normalized `g2b.bid_public_notice` table.
+Search tools query normalized G2B tables and return an `evidence` block with
+the tool name, source tables, filters, date basis, and sort.
 
 `exclude_cancelled` defaults to `True`, so notices with `notice_kind`
 containing `취소` are excluded unless explicitly requested.
@@ -31,8 +49,17 @@ Additional filters:
 - `bid_method`: partial match, such as `전자입찰`, `직찰`, `전자시담`
 - `bid_notice_no`, `bid_notice_order`: exact notice identity filters
 - `opening_from`, `opening_to`: opening date/time range
-- `demand_org_name`: demand organization partial match
+- `notice_agency_name`: 공고기관 partial match
+- `demand_agency_name`: 수요기관 partial match
 - `has_budget`: `true` for budget-only, `false` for no-budget-only
+
+Date semantics:
+
+- bid notice posting questions use `published_from` / `published_to`
+- bid deadline questions use `deadline_from` / `deadline_to`
+- award date questions use `final_success_from` / `final_success_to`
+- contract date questions use `contract_date_from` / `contract_date_to`
+- contract `registered_from` / `registered_to` means API record registration date, not actual contract date
 
 Date filters accept values such as `20260531`, `202605311800`, `2026-05-31`,
 or `2026-05-31T14:30:00`.

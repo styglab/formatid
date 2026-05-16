@@ -20,12 +20,24 @@ REQUIRED_PLATFORM_SERVICES = (
 
 @lru_cache(maxsize=1)
 def list_app_manifest_dirs() -> tuple[Path, ...]:
-    if not APPS_DIR.exists():
-        return ()
+    app_dirs = []
+    if APPS_DIR.exists():
+        app_dirs.extend(
+            path
+            for path in sorted(APPS_DIR.rglob("manifests"))
+            if path.is_dir() and (path / "app.json").exists() and _is_app_manifest_enabled(path / "app.json")
+        )
+    if SERVICES_DIR.exists():
+        app_dirs.extend(
+            path / "manifests"
+            for path in sorted(SERVICES_DIR.iterdir())
+            if path.is_dir()
+            and (path / "manifests" / "app.json").exists()
+            and _is_app_manifest_enabled(path / "manifests" / "app.json")
+        )
     return tuple(
         path
-        for path in sorted(APPS_DIR.rglob("manifests"))
-        if path.is_dir() and (path / "app.json").exists() and _is_app_manifest_enabled(path / "app.json")
+        for path in app_dirs
     )
 
 

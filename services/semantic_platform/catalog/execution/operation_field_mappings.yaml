@@ -1,0 +1,541 @@
+operation_field_mappings:
+
+  kasi.special_day.getSpecialDay.response.locdate:
+    capability: get_special_day
+    operation_id: kasi.special_day.getSpecialDay
+    resource_id: kasi.special_day
+    provider: kasi
+    field_name: locdate
+    direction: response
+    semantic_type: event_date
+
+  kasi.special_day.getSpecialDay.response.dateName:
+    capability: get_special_day
+    operation_id: kasi.special_day.getSpecialDay
+    resource_id: kasi.special_day
+    provider: kasi
+    field_name: dateName
+    direction: response
+    semantic_type: event_name
+
+  nts.business_registration.validate.request.b_no:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_no
+    direction: request
+    semantic_type: business_registration_number
+
+  nts.business_registration.validate.request.p_nm:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: p_nm
+    direction: request
+    semantic_type: representative_name
+
+  nts.business_registration.validate.request.p_nm2:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: p_nm2
+    direction: request
+    semantic_type: representative_name
+
+  nts.business_registration.validate.request.start_dt:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: start_dt
+    direction: request
+    semantic_type: business_open_date
+
+  nts.business_registration.validate.request.b_nm:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_nm
+    direction: request
+    semantic_type: organization_name
+
+  nts.business_registration.validate.request.corp_no:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: corp_no
+    direction: request
+    semantic_type: corporation_number
+
+  nts.business_registration.validate.request.b_adr:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_adr
+    direction: request
+    semantic_type: business_address
+
+  nts.business_registration.validate.response.valid:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: valid
+    direction: response
+    semantic_type: valid_status
+
+  nts.business_registration.validate.response.valid_msg:
+    capability: validate_business_registration
+    operation_id: nts.business_registration.validate
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: valid_msg
+    direction: response
+    semantic_type: result_message
+
+  nts.business_registration.status.request.b_no:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_no
+    direction: request
+    semantic_type: business_registration_number
+
+  nts.business_registration.status.response.b_no:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_no
+    direction: response
+    semantic_type: business_registration_number
+
+  nts.business_registration.status.response.b_stt:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_stt
+    direction: response
+    semantic_type: business_status
+
+  nts.business_registration.status.response.b_stt_cd:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: b_stt_cd
+    direction: response
+    semantic_type: business_status
+
+  nts.business_registration.status.response.tax_type:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: tax_type
+    direction: response
+    semantic_type: tax_type
+
+  nts.business_registration.status.response.tax_type_cd:
+    capability: check_business_status
+    operation_id: nts.business_registration.status
+    resource_id: nts.business_registration
+    provider: nts
+    field_name: tax_type_cd
+    direction: response
+    semantic_type: tax_type
+
+  vworld.cadastral.GetFeature.request.request:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: request
+    direction: request
+    semantic_type: status_code
+
+  vworld.cadastral.GetFeature.request.attrFilter:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: attrFilter
+    direction: request
+    semantic_type: pnu
+
+  vworld.cadastral.GetFeature.request.geomFilter:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: geomFilter
+    direction: request
+    semantic_type: geometry
+
+  vworld.cadastral.GetFeature.response.pnu:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: pnu
+    direction: response
+    semantic_type: pnu
+
+  vworld.cadastral.GetFeature.response.addr:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: addr
+    direction: response
+    semantic_type: parcel_address
+
+  vworld.cadastral.GetFeature.response.jibun:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: jibun
+    direction: response
+    semantic_type: lot_number
+
+  vworld.cadastral.GetFeature.response.jiga:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: jiga
+    direction: response
+    semantic_type: land_price
+
+  vworld.cadastral.GetFeature.response.ag_geom:
+    capability: get_cadastral_features
+    operation_id: vworld.cadastral.GetFeature
+    resource_id: vworld.cadastral
+    provider: vworld
+    field_name: ag_geom
+    direction: response
+    semantic_type: geometry
+
+  kma.short_forecast.common.request.nx:
+    capability: get_short_forecast
+    operation_id: "kma.short_forecast.*"
+    resource_id: kma.short_forecast
+    provider: kma
+    field_name: nx
+    direction: request
+    semantic_type: weather_grid_x
+
+  kma.short_forecast.common.request.ny:
+    capability: get_short_forecast
+    operation_id: "kma.short_forecast.*"
+    resource_id: kma.short_forecast
+    provider: kma
+    field_name: ny
+    direction: request
+    semantic_type: weather_grid_y
+
+  kma.short_forecast.common.response.category:
+    capability: get_short_forecast
+    operation_id: "kma.short_forecast.*"
+    resource_id: kma.short_forecast
+    provider: kma
+    field_name: category
+    direction: response
+    semantic_type: forecast_category
+
+  kma.short_forecast.common.response.fcstValue:
+    capability: get_short_forecast
+    operation_id: "kma.short_forecast.*"
+    resource_id: kma.short_forecast
+    provider: kma
+    field_name: fcstValue
+    direction: response
+    semantic_type: forecast_value
+
+  fss.financial_statement.common.request.crno:
+    capability: get_financial_summary
+    operation_id: "fss.financial_statement.*"
+    resource_id: fss.financial_statement
+    provider: fss
+    field_name: crno
+    direction: request
+    semantic_type: corporation_number
+
+  fss.financial_statement.common.response.crno:
+    capability: get_financial_summary
+    operation_id: "fss.financial_statement.*"
+    resource_id: fss.financial_statement
+    provider: fss
+    field_name: crno
+    direction: response
+    semantic_type: corporation_number
+
+  fss.financial_statement.common.response.enpSaleAmt:
+    capability: get_financial_summary
+    operation_id: "fss.financial_statement.*"
+    resource_id: fss.financial_statement
+    provider: fss
+    field_name: enpSaleAmt
+    direction: response
+    semantic_type: financial_revenue
+
+  pps.contract_info.common.request.numOfRows:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: numOfRows
+    direction: request
+    semantic_type: page_size
+
+  pps.contract_info.common.request.pageNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: pageNo
+    direction: request
+    semantic_type: page_number
+
+  pps.contract_info.common.request.inqryBgnDt:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: inqryBgnDt
+    direction: request
+    semantic_type: registration_datetime
+
+  pps.contract_info.common.request.inqryEndDt:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: inqryEndDt
+    direction: request
+    semantic_type: registration_datetime
+
+  pps.contract_info.common.request.untyCntrctNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: untyCntrctNo
+    direction: request
+    semantic_type: contract_id
+
+  pps.contract_info.common.response.untyCntrctNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: untyCntrctNo
+    direction: response
+    semantic_type: contract_id
+
+  pps.contract_info.common.response.dcsnCntrctNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: dcsnCntrctNo
+    direction: response
+    semantic_type: confirmed_contract_number
+
+  pps.contract_info.common.response.cntrctRefNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctRefNo
+    direction: response
+    semantic_type: contract_reference_number
+
+  pps.contract_info.common.response.cntrctNm:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctNm
+    direction: response
+    semantic_type: contract_name
+
+  pps.contract_info.common.response.bsnsDivNm:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: bsnsDivNm
+    direction: response
+    semantic_type: procurement_category
+
+  pps.contract_info.common.response.totCntrctAmt:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: totCntrctAmt
+    direction: response
+    semantic_type: contract_amount
+
+  pps.contract_info.common.response.thtmCntrctAmt:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: thtmCntrctAmt
+    direction: response
+    semantic_type: contract_amount
+
+  pps.contract_info.common.response.cntrctCnclsDate:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctCnclsDate
+    direction: response
+    semantic_type: contract_date
+
+  pps.contract_info.common.response.cntrctDate:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctDate
+    direction: response
+    semantic_type: contract_date
+
+  pps.contract_info.common.response.ntceNo:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: ntceNo
+    direction: response
+    semantic_type: bid_notice_id
+
+  pps.contract_info.common.response.cntrctInsttCd:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctInsttCd
+    direction: response
+    semantic_type: organization_code
+
+  pps.contract_info.common.response.cntrctInsttNm:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: cntrctInsttNm
+    direction: response
+    semantic_type: organization_name
+
+  pps.contract_info.common.response.corpList:
+    capability: search_procurement_contracts
+    operation_id: "pps.contract_info.*"
+    resource_id: pps.contract_info
+    provider: pps
+    field_name: corpList
+    direction: response
+    semantic_type: organization_name
+
+  exim.exchange_rate.exchangeJSON.response.cur_unit:
+    capability: get_exchange_rate
+    operation_id: exim.exchange_rate.exchangeJSON
+    resource_id: exim.exchange_rate
+    provider: exim
+    field_name: cur_unit
+    direction: response
+    semantic_type: exchange_currency_code
+
+  exim.exchange_rate.exchangeJSON.response.deal_bas_r:
+    capability: get_exchange_rate
+    operation_id: exim.exchange_rate.exchangeJSON
+    resource_id: exim.exchange_rate
+    provider: exim
+    field_name: deal_bas_r
+    direction: response
+    semantic_type: exchange_rate
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.request.stationName:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: stationName
+    direction: request
+    semantic_type: station_name
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.stationName:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: stationName
+    direction: response
+    semantic_type: station_name
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.stationCode:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: stationCode
+    direction: response
+    semantic_type: station_code
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.dataTime:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: dataTime
+    direction: response
+    semantic_type: observation_datetime
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.khaiValue:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: khaiValue
+    direction: response
+    semantic_type: air_quality_index
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.khaiGrade:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: khaiGrade
+    direction: response
+    semantic_type: air_quality_grade
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.khaiItem:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: khaiItem
+    direction: response
+    semantic_type: main_pollutant
+
+  keco.air_quality.getMsrstnKhaiRltmDnsty.response.pm10Value:
+    capability: get_air_quality_realtime
+    operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+    resource_id: keco.air_quality
+    provider: keco
+    field_name: pm10Value
+    direction: response
+    semantic_type: pm10_value

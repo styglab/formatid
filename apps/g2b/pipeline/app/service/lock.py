@@ -31,6 +31,18 @@ def g2b_success_bid_ingest_run_lock() -> Iterator[bool]:
         yield acquired
 
 
+@contextmanager
+def g2b_contract_ingest_run_lock() -> Iterator[bool]:
+    database_url = os.getenv("G2B_INGEST_DATABASE_URL")
+    if not database_url:
+        yield True
+        return
+
+    lock_name = os.getenv("G2B_CONTRACT_INGEST_RUN_LOCK_NAME", "g2b_contract_ingest_run")
+    with ingest_run_lock(database_url=database_url, lock_name=lock_name) as acquired:
+        yield acquired
+
+
 def skipped_by_running_ingest(
     *,
     flow: str,
@@ -41,6 +53,6 @@ def skipped_by_running_ingest(
         "flow": flow,
         "window": window,
         "skipped": True,
-        "reason": "another g2b bid ingest flow is already running",
+        "reason": "another g2b ingest flow is already running",
         "lock_name": lock_name or os.getenv("G2B_INGEST_RUN_LOCK_NAME", "g2b_bid_ingest_run"),
     }

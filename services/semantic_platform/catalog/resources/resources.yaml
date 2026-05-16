@@ -1,0 +1,350 @@
+resources:
+
+  kasi.special_day:
+    provider: kasi
+    base_url: null
+    source_path: sources/OpenAPI활용가이드_한국천문연구원_천문우주정보__특일_정보제공_서비스_v1.4.docx
+    source_sha256: e8499f88f8c684a3ab3086d97308827555cad7d1ad59ef0df3b7af541b20b36f
+    capabilities: [get_special_day]
+    operations:
+      -
+        operation_id: kasi.special_day.getSpecialDay
+        method: GET
+        path: null
+        title_ko: inferred_special_day_query
+
+  nts.business_registration:
+    provider: nts
+    base_url: https://api.odcloud.kr/api/nts-businessman/v1
+    source_path: "sources/국세청_사업자등록정보 진위확인 및 상태조회 서비스.md"
+    source_sha256: c08195ad0c0634a3430413856a06e2f126291eb5b16673316ab1e6dd9b0f0150
+    capabilities: [check_business_status, validate_business_registration]
+    operations:
+      -
+        operation_id: nts.business_registration.validate
+        method: POST
+        path: /validate
+        title_ko: validate
+      -
+        operation_id: nts.business_registration.status
+        method: POST
+        path: /status
+        title_ko: status
+
+  vworld.cadastral:
+    provider: vworld
+    base_url: https://api.vworld.kr/req/data
+    source_path: sources/국토교통부_연속지적도.txt
+    source_sha256: 900df6e9f6e8b851e42750344c4424d187e68f90d0feb6c77484e9e867f10e54
+    capabilities: [get_cadastral_features, get_cadastral_schema]
+    operations:
+      -
+        operation_id: vworld.cadastral.GetFeature
+        method: GET
+        path: /req/data
+        title_ko: GetFeature
+      -
+        operation_id: vworld.cadastral.GetFeatureType
+        method: GET
+        path: /req/data
+        title_ko: GetFeatureType
+
+  kma.asos_hourly:
+    provider: kma
+    base_url: null
+    source_path: "sources/기상청01_지상(종관,ASOS)시간자료_조회서비스_오픈API활용가이드.docx"
+    source_sha256: c4484c0ae95e63eee5b2b8c3fd4e49fff4401321dbb792eae6055288b606c318
+    capabilities: [get_asos_hourly_observation]
+    operations:
+      -
+        operation_id: kma.asos_hourly.getWthrDataList
+        method: GET
+        path: null
+        title_ko: getWthrDataList
+
+  kma.asos_daily:
+    provider: kma
+    base_url: null
+    source_path: "sources/기상청02_지상(종관,ASOS)일자료_조회서비스_오픈API활용가이드.docx"
+    source_sha256: 60e1014ff64ebfeb387d65d8cb5682c9f6058a00415cf45481bc4e59db1a769a
+    capabilities: [get_asos_daily_observation]
+    operations:
+      -
+        operation_id: kma.asos_daily.getWthrDataList
+        method: GET
+        path: null
+        title_ko: getWthrDataList
+
+  kma.weather_warning:
+    provider: kma
+    base_url: null
+    source_path: "sources/기상청21_기상특보 조회서비스_오픈API활용가이드_240715.zip"
+    source_sha256: b2fb9dccdae29245469d825f0185d3d1af14fb808742894340825866ebb55358
+    capabilities: [get_weather_warning]
+    operations:
+      -
+        operation_id: kma.weather_warning.getWthrWrnList
+        method: GET
+        path: null
+        title_ko: getWthrWrnList
+      -
+        operation_id: kma.weather_warning.getWthrWrnMsg
+        method: GET
+        path: null
+        title_ko: getWthrWrnMsg
+      -
+        operation_id: kma.weather_warning.getWthrInfoList
+        method: GET
+        path: null
+        title_ko: getWthrInfoList
+      -
+        operation_id: kma.weather_warning.getWthrInfo
+        method: GET
+        path: null
+        title_ko: getWthrInfo
+      -
+        operation_id: kma.weather_warning.getWthrBrkNewsList
+        method: GET
+        path: null
+        title_ko: getWthrBrkNewsList
+      -
+        operation_id: kma.weather_warning.getWthrBrkNews
+        method: GET
+        path: null
+        title_ko: getWthrBrkNews
+      -
+        operation_id: kma.weather_warning.getWthrPwnList
+        method: GET
+        path: null
+        title_ko: getWthrPwnList
+      -
+        operation_id: kma.weather_warning.getWthrPwn
+        method: GET
+        path: null
+        title_ko: getWthrPwn
+      -
+        operation_id: kma.weather_warning.getPwnCd
+        method: GET
+        path: null
+        title_ko: getPwnCd
+      -
+        operation_id: kma.weather_warning.getPwnStatus
+        method: GET
+        path: null
+        title_ko: getPwnStatus
+
+  kma.tour_weather:
+    provider: kma
+    base_url: null
+    source_path: sources/기상청27_관광코스별_관광지_상세설명서.zip
+    source_sha256: 8dddb974ab994a1109e01de95130d005cf0b9f6fc5e79a731d159104329c82c4
+    capabilities: [get_tour_weather_forecast]
+    operations:
+      -
+        operation_id: kma.tour_weather.getTourStnVilageFcst
+        method: GET
+        path: null
+        title_ko: getTourStnVilageFcst
+
+  kma.mid_forecast:
+    provider: kma
+    base_url: null
+    source_path: "sources/기상청28_중기예보 조회서비스_오픈API활용가이드_251212.zip"
+    source_sha256: 303bf7a6c128e47d21afd1cc731af9c3d2d846afcf67a3ed10239cbb7aa18575
+    capabilities: [get_mid_forecast]
+    operations:
+      -
+        operation_id: kma.mid_forecast.getMidFcst
+        method: GET
+        path: null
+        title_ko: getMidFcst
+      -
+        operation_id: kma.mid_forecast.getMidTa
+        method: GET
+        path: null
+        title_ko: getMidTa
+      -
+        operation_id: kma.mid_forecast.getMidSeaFcst
+        method: GET
+        path: null
+        title_ko: getMidSeaFcst
+
+  kma.short_forecast:
+    provider: kma
+    base_url: null
+    source_path: "sources/기상청41_단기예보 조회서비스_오픈API활용가이드_241128.docx"
+    source_sha256: 4948ddfc4a9e795f25cbe83326f60c6f3cb6391aed203fe7e825ff56636ae624
+    capabilities: [get_short_forecast]
+    operations:
+      -
+        operation_id: kma.short_forecast.getUltraSrtNcst
+        method: GET
+        path: null
+        title_ko: getUltraSrtNcst
+      -
+        operation_id: kma.short_forecast.getUltraSrtFcst
+        method: GET
+        path: null
+        title_ko: getUltraSrtFcst
+      -
+        operation_id: kma.short_forecast.getVilageFcst
+        method: GET
+        path: null
+        title_ko: getVilageFcst
+
+  fss.financial_statement:
+    provider: fss
+    base_url: null
+    source_path: "sources/오픈API 활용자가이드_기업 재무정보.docx"
+    source_sha256: 836013946be5769e5a9c08c596fed12697142305de14c47facd49c1b2dc8c8a7
+    capabilities: [get_financial_summary, get_income_statement]
+    operations:
+      -
+        operation_id: fss.financial_statement.getSummFinaStat
+        method: GET
+        path: null
+        title_ko: getSummFinaStat
+      -
+        operation_id: fss.financial_statement.getIncoStat
+        method: GET
+        path: null
+        title_ko: getIncoStat
+
+  pps.contract_info:
+    provider: pps
+    base_url: http://apis.data.go.kr/1230000/ao/CntrctInfoService
+    source_path: sources/조달청_OpenAPI참고자료_나라장터_계약정보서비스_1.0.docx
+    source_sha256: ea5bc5363bba09503e13c924a372a76e3239fcc427c49c916ab798b21ccef101
+    capabilities: [get_procurement_contract_detail, search_procurement_contract_change_history, search_procurement_contract_delete_history, search_procurement_contracts, search_procurement_contracts_by_conditions]
+    operations:
+      -
+        operation_id: pps.contract_info.getCntrctInfoListThng
+        method: GET
+        path: /getCntrctInfoListThngPPSSrch
+        title_ko: getCntrctInfoListThng
+      -
+        operation_id: pps.contract_info.getCntrctInfoListCnstwk
+        method: GET
+        path: /getCntrctInfoListCnstwkPPSSrch
+        title_ko: getCntrctInfoListCnstwk
+      -
+        operation_id: pps.contract_info.getCntrctInfoListServc
+        method: GET
+        path: /getCntrctInfoListServcPPSSrch
+        title_ko: getCntrctInfoListServc
+      -
+        operation_id: pps.contract_info.getCntrctInfoListFrgcpt
+        method: GET
+        path: /getCntrctInfoListFrgcptPPSSrch
+        title_ko: getCntrctInfoListFrgcpt
+      -
+        operation_id: pps.contract_info.getCntrctInfoListThngDetail
+        method: GET
+        path: /getCntrctInfoListThngDetail
+        title_ko: getCntrctInfoListThngDetail
+      -
+        operation_id: pps.contract_info.getCntrctInfoListCnstwkServcInfo
+        method: GET
+        path: /getCntrctInfoListCnstwkServcInfo
+        title_ko: getCntrctInfoListCnstwkServcInfo
+      -
+        operation_id: pps.contract_info.getCntrctInfoListGnrlServcServcInfo
+        method: GET
+        path: /getCntrctInfoListGnrlServcServcInfo
+        title_ko: getCntrctInfoListGnrlServcServcInfo
+      -
+        operation_id: pps.contract_info.getCntrctInfoListTechServcServcInfo
+        method: GET
+        path: /getCntrctInfoListTechServcServcInfo
+        title_ko: getCntrctInfoListTechServcServcInfo
+      -
+        operation_id: pps.contract_info.getCntrctInfoListFrgcptDetail
+        method: GET
+        path: /getCntrctInfoListFrgcptDetail
+        title_ko: getCntrctInfoListFrgcptDetail
+      -
+        operation_id: pps.contract_info.getCntrctInfoListThngPPSSrch
+        method: GET
+        path: /getCntrctInfoListThngPPSSrch
+        title_ko: getCntrctInfoListThngPPSSrch
+      -
+        operation_id: pps.contract_info.getCntrctInfoListCnstwkPPSSrch
+        method: GET
+        path: /getCntrctInfoListCnstwkPPSSrch
+        title_ko: getCntrctInfoListCnstwkPPSSrch
+      -
+        operation_id: pps.contract_info.getCntrctInfoListServcPPSSrch
+        method: GET
+        path: /getCntrctInfoListServcPPSSrch
+        title_ko: getCntrctInfoListServcPPSSrch
+      -
+        operation_id: pps.contract_info.getCntrctInfoListFrgcptPPSSrch
+        method: GET
+        path: /getCntrctInfoListFrgcptPPSSrch
+        title_ko: getCntrctInfoListFrgcptPPSSrch
+      -
+        operation_id: pps.contract_info.getCntrctInfoListThngChgHstry
+        method: GET
+        path: /getCntrctInfoListThngChgHstry
+        title_ko: getCntrctInfoListThngChgHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListCnstwkChgHstry
+        method: GET
+        path: /getCntrctInfoListCnstwkChgHstry
+        title_ko: getCntrctInfoListCnstwkChgHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListServcChgHstry
+        method: GET
+        path: /getCntrctInfoListServcChgHstry
+        title_ko: getCntrctInfoListServcChgHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListFrgcptChgHstry
+        method: GET
+        path: /getCntrctInfoListFrgcptChgHstry
+        title_ko: getCntrctInfoListFrgcptChgHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListThngDltHstry
+        method: GET
+        path: /getCntrctInfoListThngDltHstry
+        title_ko: getCntrctInfoListThngDltHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListCnstwkDltHstry
+        method: GET
+        path: /getCntrctInfoListCnstwkDltHstry
+        title_ko: getCntrctInfoListCnstwkDltHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListServcDltHstry
+        method: GET
+        path: /getCntrctInfoListServcDltHstry
+        title_ko: getCntrctInfoListServcDltHstry
+      -
+        operation_id: pps.contract_info.getCntrctInfoListFrgcptDltHstry
+        method: GET
+        path: /getCntrctInfoListFrgcptDltHstry
+        title_ko: getCntrctInfoListFrgcptDltHstry
+
+  exim.exchange_rate:
+    provider: exim
+    base_url: null
+    source_path: "sources/한국수출입은행 환율 정보.txt"
+    source_sha256: d79b299fcf09d7b15f6353dbcf0f552f83a4bc45351f3a8186c04abbc8100e82
+    capabilities: [get_exchange_rate]
+    operations:
+      -
+        operation_id: exim.exchange_rate.exchangeJSON
+        method: GET
+        path: null
+        title_ko: exchangeJSON
+
+  keco.air_quality:
+    provider: keco
+    base_url: http://apis.data.go.kr/B552584/RltmKhaiInfoSvc
+    source_path: "sources/한국환경공단_에어코리아_통합대기환경지수(CAI) 조회 서비스_v1.0_1_20241220.docx"
+    source_sha256: ce7a0529fd1797f5682165013246fdc939cff3cdcaff30ba982989811117611b
+    capabilities: [get_air_quality_realtime]
+    operations:
+      -
+        operation_id: keco.air_quality.getMsrstnKhaiRltmDnsty
+        method: GET
+        path: /getMsrstnKhaiRltmDnsty
+        title_ko: getMsrstnKhaiRltmDnsty
