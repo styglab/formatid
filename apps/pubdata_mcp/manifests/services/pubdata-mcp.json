@@ -1,0 +1,23 @@
+{
+  "service_name": "pubdata-mcp",
+  "service_type": "api",
+  "dockerfile": "apps/pubdata_mcp/infra/image/Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "apps/pubdata_mcp/infra/env/app.env"
+  ],
+  "depends_on_service_healthy": [
+    "semantic-platform-api"
+  ],
+  "ports": [
+    "${HOST_BIND_IP:-127.0.0.1}:${PUBDATA_MCP_HOST_PORT:-8015}:8000"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

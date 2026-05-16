@@ -6,6 +6,7 @@ COPY apps/g2b/pipeline/infra/image/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY apps ./apps
+COPY core ./core
 
 ENV PYTHONPATH=/app
 

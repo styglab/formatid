@@ -1,0 +1,31 @@
+{
+  "app": "semantic_platform",
+  "description": "Platform semantic control plane for catalog, proposal review, planning, and source ingestion",
+  "profiles": [
+    "semantic_platform",
+    "pubdata"
+  ],
+  "nginx_routes": [
+    {
+      "path_prefix": "/semantic-platform",
+      "upstream_service": "semantic-platform-api",
+      "upstream_port": 8000,
+      "strip_prefix": true
+    },
+    {
+      "path_prefix": "/semantic-platform-dashboard",
+      "upstream_service": "semantic-platform-dashboard",
+      "upstream_port": 80,
+      "strip_prefix": true
+    }
+  ],
+  "requires": {
+    "platform_services": [
+      "semantic-platform-api",
+      "semantic-platform-dashboard",
+      "semantic-platform-worker",
+      "prefect-server",
+      "prefect-services"
+    ]
+  }
+}

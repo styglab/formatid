@@ -163,6 +163,10 @@ def _ensure_normalized_table(
                 bid_notice_no TEXT NOT NULL,
                 bid_notice_order TEXT NOT NULL DEFAULT '000',
                 title TEXT NOT NULL,
+                notice_agency_code TEXT,
+                notice_agency_name TEXT,
+                demand_agency_code TEXT,
+                demand_agency_name TEXT,
                 organization_name TEXT,
                 demand_org_name TEXT,
                 budget NUMERIC,
@@ -181,10 +185,15 @@ def _ensure_normalized_table(
             )
             '''
         )
+        cursor.execute(f'ALTER TABLE "{schema_name}"."{table_name}" ADD COLUMN IF NOT EXISTS notice_agency_code TEXT')
+        cursor.execute(f'ALTER TABLE "{schema_name}"."{table_name}" ADD COLUMN IF NOT EXISTS notice_agency_name TEXT')
+        cursor.execute(f'ALTER TABLE "{schema_name}"."{table_name}" ADD COLUMN IF NOT EXISTS demand_agency_code TEXT')
+        cursor.execute(f'ALTER TABLE "{schema_name}"."{table_name}" ADD COLUMN IF NOT EXISTS demand_agency_name TEXT')
         for suffix, expression in {
             "category_published": "(category, published_at DESC)",
             "deadline": "(deadline_at)",
-            "organization": "(organization_name)",
+            "notice_agency": "(notice_agency_name)",
+            "demand_agency": "(demand_agency_name)",
             "budget": "(budget)",
         }.items():
             cursor.execute(
@@ -201,8 +210,14 @@ def _ensure_normalized_table(
         )
         cursor.execute(
             f'''
-            CREATE INDEX IF NOT EXISTS "{table_name}_organization_trgm_idx"
-            ON "{schema_name}"."{table_name}" USING gin (organization_name public.gin_trgm_ops)
+            CREATE INDEX IF NOT EXISTS "{table_name}_notice_agency_trgm_idx"
+            ON "{schema_name}"."{table_name}" USING gin (notice_agency_name public.gin_trgm_ops)
+            '''
+        )
+        cursor.execute(
+            f'''
+            CREATE INDEX IF NOT EXISTS "{table_name}_demand_agency_trgm_idx"
+            ON "{schema_name}"."{table_name}" USING gin (demand_agency_name public.gin_trgm_ops)
             '''
         )
 
@@ -220,10 +235,12 @@ def _write_normalized_rows(
     statement = (
         f'INSERT INTO "{schema_name}"."{table_name}" '
         "(resource_key, category, category_label, bid_notice_no, bid_notice_order, title, "
+        "notice_agency_code, notice_agency_name, demand_agency_code, demand_agency_name, "
         "organization_name, demand_org_name, budget, published_at, deadline_at, opening_at, "
         "contract_method, bid_method, notice_kind, detail_url, source_url, raw_id, updated_at) "
         "VALUES (%(resource_key)s, %(category)s, %(category_label)s, %(bid_notice_no)s, "
-        "%(bid_notice_order)s, %(title)s, %(organization_name)s, %(demand_org_name)s, "
+        "%(bid_notice_order)s, %(title)s, %(notice_agency_code)s, %(notice_agency_name)s, "
+        "%(demand_agency_code)s, %(demand_agency_name)s, %(organization_name)s, %(demand_org_name)s, "
         "%(budget)s, %(published_at)s, %(deadline_at)s, %(opening_at)s, %(contract_method)s, "
         "%(bid_method)s, %(notice_kind)s, %(detail_url)s, %(source_url)s, %(raw_id)s, %(updated_at)s) "
         "ON CONFLICT (resource_key) DO UPDATE SET "
@@ -232,6 +249,10 @@ def _write_normalized_rows(
         "bid_notice_no = EXCLUDED.bid_notice_no, "
         "bid_notice_order = EXCLUDED.bid_notice_order, "
         "title = EXCLUDED.title, "
+        "notice_agency_code = EXCLUDED.notice_agency_code, "
+        "notice_agency_name = EXCLUDED.notice_agency_name, "
+        "demand_agency_code = EXCLUDED.demand_agency_code, "
+        "demand_agency_name = EXCLUDED.demand_agency_name, "
         "organization_name = EXCLUDED.organization_name, "
         "demand_org_name = EXCLUDED.demand_org_name, "
         "budget = EXCLUDED.budget, "

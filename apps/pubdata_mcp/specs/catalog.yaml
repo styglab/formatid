@@ -1,0 +1,102 @@
+tools:
+  - name: semantic_query
+    description: Plan a natural-language public-data question as a provider-neutral semantic execution DAG and optionally execute mapped provider tools.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_query
+    input:
+      required:
+        - query
+      fields:
+        query:
+          type: string
+          description: Natural language question, such as 300억 이상 기업들의 조달 참여 규모.
+        limit:
+          type: integer
+          description: Maximum semantic items and capability nodes to consider.
+          default: 8
+        execute:
+          type: boolean
+          description: Execute DAG nodes when semantic arguments can be mapped to registered provider tools.
+          default: false
+        manual_plan:
+          type: object
+          description: Explicit execution-plan LLM response payload used only when LLM_MODE=codex_manual.
+
+  - name: semantic_parse_intent
+    description: Parse a natural-language public-data question into structured semantic intent using the semantic platform LLM path with catalog validation.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_parse_intent
+    input:
+      required:
+        - query
+      fields:
+        query:
+          type: string
+          description: Natural language question to parse.
+        limit:
+          type: integer
+          description: Maximum semantic context items to consider.
+          default: 8
+        manual_intent:
+          type: object
+          description: Explicit structured LLM response payload used only when LLM_MODE=codex_manual.
+
+  - name: semantic_get_context
+    description: Build a compact runtime context package for an LLM or MCP planner from a natural language cross-domain query.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_get_context
+    input:
+      required:
+        - query
+      fields:
+        query:
+          type: string
+          description: Natural language query, such as 300억 이상 기업들의 조달 참여 규모.
+        limit:
+          type: integer
+          description: Maximum semantic items per section.
+          default: 8
+
+  - name: semantic_resolve
+    description: Resolve a Korean or English term, operation field, or API path to core/domain semantic entities, properties, or mappings.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_resolve
+    input:
+      required:
+        - query
+      fields:
+        query:
+          type: string
+          description: Term to resolve, such as 업체, 사업자번호, crno, p_nm, PM10, or 계약일자.
+        limit:
+          type: integer
+          description: Maximum matches to return.
+          default: 10
+
+  - name: semantic_find_capabilities
+    description: Find public-data capabilities that consume or produce the requested semantic entity or properties.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_find_capabilities
+    input:
+      required: []
+      fields:
+        entity:
+          type: string
+          description: Optional semantic entity, such as business.Company or procurement.Supplier.
+        properties:
+          type: array
+          description: Optional semantic properties, such as core.business_registration_number or procurement.contract_date.
+        limit:
+          type: integer
+          description: Maximum capabilities to return.
+          default: 20
+
+  - name: semantic_plan_join
+    description: Plan a cross-domain semantic join path between two entities.
+    handler: apps.pubdata_mcp.app.common.catalog.semantic_plan_join
+    input:
+      required:
+        - from_entity
+        - to_entity
+      fields:
+        from_entity:
+          type: string
+          description: Source semantic entity, such as procurement.Supplier.
+        to_entity:
+          type: string
+          description: Target semantic entity, such as business.Company.

@@ -1,0 +1,1 @@
+"""Federated semantic catalog app."""

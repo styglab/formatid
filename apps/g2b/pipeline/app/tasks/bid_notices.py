@@ -5,6 +5,7 @@ from typing import Any
 
 from prefect import task
 
+from apps.g2b.schema import BID_NOTICE_TABLE, DEFAULT_SCHEMA
 from apps.g2b.pipeline.app.repositories.bid_notices import (
     normalize_raw_notices as normalize_raw_notices_repository,
 )
@@ -27,8 +28,8 @@ def write_records(category: str, window: G2BIngestWindow, records: list[dict[str
 def write_records_value(category: str, window: G2BIngestWindow, records: list[dict[str, Any]]) -> int:
     return write_raw_records(
         database_url=os.environ["G2B_INGEST_DATABASE_URL"],
-        schema_name=os.getenv("G2B_INGEST_SCHEMA", "g2b"),
-        table_name=os.getenv("G2B_INGEST_TABLE", "bid_public_notice_raw"),
+        schema_name=os.getenv("G2B_INGEST_SCHEMA", DEFAULT_SCHEMA),
+        table_name=os.getenv("G2B_INGEST_TABLE", BID_NOTICE_TABLE.raw_table or "bid_public_notice_raw"),
         category=category,
         window=window,
         records=records,
@@ -47,10 +48,10 @@ def normalize_raw_notices_once(
 ) -> dict[str, Any]:
     return normalize_raw_notices_repository(
         database_url=os.environ["G2B_INGEST_DATABASE_URL"],
-        raw_schema=os.getenv("G2B_INGEST_SCHEMA", "g2b"),
-        raw_table=os.getenv("G2B_INGEST_TABLE", "bid_public_notice_raw"),
-        target_schema=os.getenv("G2B_NORMALIZED_SCHEMA", "g2b"),
-        target_table=os.getenv("G2B_NORMALIZED_TABLE", "bid_public_notice"),
+        raw_schema=os.getenv("G2B_INGEST_SCHEMA", DEFAULT_SCHEMA),
+        raw_table=os.getenv("G2B_INGEST_TABLE", BID_NOTICE_TABLE.raw_table or "bid_public_notice_raw"),
+        target_schema=os.getenv("G2B_NORMALIZED_SCHEMA", DEFAULT_SCHEMA),
+        target_table=os.getenv("G2B_NORMALIZED_TABLE", BID_NOTICE_TABLE.normalized_table),
         window_begin=window_begin,
         window_end=window_end,
     )

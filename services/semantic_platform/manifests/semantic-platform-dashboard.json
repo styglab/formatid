@@ -1,0 +1,18 @@
+{
+  "service_name": "semantic-platform-dashboard",
+  "dockerfile": "services/semantic_platform/dashboard/infra/image/Dockerfile",
+  "build_context": "../..",
+  "restart": "unless-stopped",
+  "ports": [
+    "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_DASHBOARD_HOST_PORT:-3016}:80"
+  ],
+  "depends_on_service_healthy": [
+    "semantic-platform-api"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "wget", "-qO-", "http://127.0.0.1/"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

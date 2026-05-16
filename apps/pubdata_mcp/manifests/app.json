@@ -1,0 +1,20 @@
+{
+  "app": "pubdata_mcp",
+  "description": "Public-data MCP examples backed by direct API calls",
+  "profiles": [
+    "pubdata-mcp",
+    "pubdata"
+  ],
+  "nginx_routes": [
+    {
+      "path_prefix": "/pubdata-mcp",
+      "upstream_service": "pubdata-mcp",
+      "upstream_port": 8000,
+      "strip_prefix": true,
+      "proxy_buffering": false,
+      "proxy_read_timeout": "3600s",
+      "proxy_send_timeout": "3600s"
+    }
+  ],
+  "requires": {}
+}

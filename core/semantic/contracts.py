@@ -17,6 +17,7 @@ class SemanticRelationship(TypedDict):
 
 
 class SemanticObject(TypedDict):
+    semantic_model_version: NotRequired[str]
     entity_type: str
     entity_id: str
     label: str
@@ -26,6 +27,7 @@ class SemanticObject(TypedDict):
 
 
 class SemanticDocument(TypedDict):
+    semantic_model_version: NotRequired[str]
     document_id: str
     entity: EntityRef
     title: str

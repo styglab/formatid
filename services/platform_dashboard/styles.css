@@ -253,17 +253,33 @@ h2 {
   padding: 22px 28px 36px;
 }
 
+.main.grid {
+  gap: 12px;
+}
+
 .grid {
   display: grid;
   gap: 16px;
+}
+
+.dashboard-page {
+  display: grid;
+  gap: 8px;
 }
 
 .kpis {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
-.runtime-kpis {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+.paired-kpis {
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.kpi-pair {
+  align-items: stretch;
+  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .app-overview {
@@ -271,7 +287,7 @@ h2 {
 }
 
 .app-metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .app-control-grid {
@@ -280,6 +296,31 @@ h2 {
 
 .two-col {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.pipeline-layout {
+  align-items: start;
+  grid-template-columns: minmax(560px, 1.35fr) minmax(360px, 0.65fr);
+}
+
+.dashboard-layout,
+.g2b-dashboard-layout {
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-layout > .card {
+  min-height: 680px;
+}
+
+.right-stack {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.summary-card .app-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .card {
@@ -315,6 +356,22 @@ h2 {
   min-height: 104px;
 }
 
+.paired-kpis .kpi {
+  height: 96px;
+  min-height: 96px;
+  padding: 11px 14px 13px;
+}
+
+.paired-kpis .kpi-value {
+  margin-top: 5px;
+  font-size: 20px;
+}
+
+.paired-kpis .kpi-detail {
+  margin-top: 3px;
+  min-height: 24px;
+}
+
 .kpi-label {
   color: var(--muted);
   font-size: 12px;
@@ -326,6 +383,7 @@ h2 {
   margin-top: 8px;
   font-size: 24px;
   font-weight: 750;
+  overflow-wrap: anywhere;
 }
 
 .kpi-detail {
@@ -348,12 +406,15 @@ h2 {
 
 .badge.healthy,
 .badge.succeeded,
+.badge.completed,
 .badge.enqueued {
   color: var(--green);
   background: var(--green-bg);
 }
 
 .badge.failed,
+.badge.crashed,
+.badge.cancelled,
 .badge.dead_lettered,
 .badge.interrupted,
 .badge.down,
@@ -371,6 +432,8 @@ h2 {
 }
 
 .badge.queued,
+.badge.scheduled,
+.badge.unmonitored,
 .badge.unknown {
   color: var(--blue);
   background: var(--blue-bg);
@@ -450,7 +513,7 @@ td.wrap {
 }
 
 .metric-tile {
-  min-height: 104px;
+  min-height: 92px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -500,7 +563,7 @@ td.wrap {
 
 .health-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto minmax(110px, 0.8fr);
+  grid-template-columns: minmax(180px, 0.8fr) auto minmax(240px, 1.2fr);
   align-items: center;
   gap: 10px;
   min-height: 30px;
@@ -518,6 +581,11 @@ td.wrap {
 .dense-table th,
 .dense-table td {
   padding: 8px 10px;
+}
+
+.dashboard-layout .dense-table th,
+.dashboard-layout .dense-table td {
+  padding: 9px 12px;
 }
 
 .log-toolbar {
@@ -590,11 +658,19 @@ td.wrap {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .runtime-kpis,
+  .paired-kpis,
   .app-overview,
   .app-control-grid,
-  .app-metrics {
+  .app-metrics,
+  .pipeline-layout,
+  .dashboard-layout,
+  .g2b-dashboard-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-layout,
+  .g2b-dashboard-layout {
+    grid-template-columns: 1fr;
   }
 
   .two-col {
@@ -646,10 +722,15 @@ td.wrap {
     grid-template-columns: 1fr;
   }
 
-  .runtime-kpis,
+  .paired-kpis,
+  .kpi-pair,
   .app-overview,
   .app-control-grid,
-  .app-metrics {
+  .app-metrics,
+  .pipeline-layout,
+  .dashboard-layout,
+  .g2b-dashboard-layout,
+  .summary-card .app-metrics {
     grid-template-columns: 1fr;
   }
 

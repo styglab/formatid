@@ -1,12 +1,17 @@
 {
   "service_name": "postgres",
   "image": "postgres:16-alpine",
+  "command": [
+    "postgres",
+    "-c",
+    "timezone=Asia/Seoul"
+  ],
   "restart": "unless-stopped",
   "env_files": [
     "deploy/compose/env/postgres.env"
   ],
   "ports": [
-    "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
+    "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
   ],
   "volumes": [
     "${POSTGRES_DATA_DIR:-../../data/postgres}:/var/lib/postgresql/data",

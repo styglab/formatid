@@ -7,6 +7,7 @@ from prefect import flow
 from apps.g2b.pipeline.app.service.lock import g2b_success_bid_ingest_run_lock
 from apps.g2b.pipeline.app.steps.common import G2BIngestWindow
 from apps.g2b.pipeline.app.steps.success_bids import SUCCESS_BID_URLS
+from apps.g2b.pipeline.app.tasks.companies import sync_award_companies
 from apps.g2b.pipeline.app.tasks.success_bids import (
     fetch_success_bid_category,
     normalize_success_bids,
@@ -39,8 +40,14 @@ def g2b_success_bid_initial_ingest(
             for category, fetch_future in fetch_futures.items()
         }
         normalized_result = normalize_success_bids.submit(window_begin=begin, window_end=end).result()
+        companies_result = sync_award_companies.submit(window_begin=begin, window_end=end).result()
 
-    return _build_success_bid_ingest_result(window=window, raw_counts=raw_counts, normalized_result=normalized_result)
+    return _build_success_bid_ingest_result(
+        window=window,
+        raw_counts=raw_counts,
+        normalized_result=normalized_result,
+        companies_result=companies_result,
+    )
 
 
 def _build_success_bid_ingest_result(
@@ -48,6 +55,7 @@ def _build_success_bid_ingest_result(
     window: G2BIngestWindow,
     raw_counts: dict[str, int],
     normalized_result: dict[str, Any],
+    companies_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "window": {"begin": window.begin, "end": window.end},
@@ -59,4 +67,5 @@ def _build_success_bid_ingest_result(
             },
             "normalized": normalized_result,
         },
+        "companies": companies_result,
     }

@@ -5,6 +5,7 @@ from typing import Any
 
 from prefect import task
 
+from apps.g2b.schema import DEFAULT_SCHEMA, LICENSE_CONSTRAINT_TABLE
 from apps.g2b.pipeline.app.repositories.license_limits import (
     normalize_raw_license_limits as normalize_raw_license_limits_repository,
 )
@@ -27,8 +28,11 @@ def write_license_limits(window: G2BIngestWindow, records: list[dict[str, Any]])
 def write_license_limits_value(window: G2BIngestWindow, records: list[dict[str, Any]]) -> int:
     return write_license_limit_raw_records(
         database_url=os.environ["G2B_INGEST_DATABASE_URL"],
-        schema_name=os.getenv("G2B_INGEST_SCHEMA", "g2b"),
-        table_name=os.getenv("G2B_LICENSE_LIMIT_RAW_TABLE", "bid_public_notice_license_limit_raw"),
+        schema_name=os.getenv("G2B_INGEST_SCHEMA", DEFAULT_SCHEMA),
+        table_name=os.getenv(
+            "G2B_LICENSE_LIMIT_RAW_TABLE",
+            LICENSE_CONSTRAINT_TABLE.raw_table or "bid_public_notice_license_limit_raw",
+        ),
         window=window,
         records=records,
     )
@@ -46,10 +50,13 @@ def normalize_license_limits_once(
 ) -> dict[str, Any]:
     return normalize_raw_license_limits_repository(
         database_url=os.environ["G2B_INGEST_DATABASE_URL"],
-        raw_schema=os.getenv("G2B_INGEST_SCHEMA", "g2b"),
-        raw_table=os.getenv("G2B_LICENSE_LIMIT_RAW_TABLE", "bid_public_notice_license_limit_raw"),
-        target_schema=os.getenv("G2B_NORMALIZED_SCHEMA", "g2b"),
-        target_table=os.getenv("G2B_LICENSE_LIMIT_NORMALIZED_TABLE", "bid_public_notice_license_limit"),
+        raw_schema=os.getenv("G2B_INGEST_SCHEMA", DEFAULT_SCHEMA),
+        raw_table=os.getenv(
+            "G2B_LICENSE_LIMIT_RAW_TABLE",
+            LICENSE_CONSTRAINT_TABLE.raw_table or "bid_public_notice_license_limit_raw",
+        ),
+        target_schema=os.getenv("G2B_NORMALIZED_SCHEMA", DEFAULT_SCHEMA),
+        target_table=os.getenv("G2B_LICENSE_LIMIT_NORMALIZED_TABLE", LICENSE_CONSTRAINT_TABLE.normalized_table),
         window_begin=window_begin,
         window_end=window_end,
     )

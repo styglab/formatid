@@ -1,0 +1,161 @@
+capabilities:
+
+  get_special_day:
+    consumes: [event_date, page_number, page_size]
+    produces: [event_date, event_name, status_code, result_message]
+    entities: [CalendarEvent]
+    relations: [CalendarEvent_OCCURS_ON_Date]
+    join_keys: [event_date]
+    description_ko: "한국천문연구원 특일 정보를 조회합니다."
+
+  validate_business_registration:
+    consumes: [business_registration_number, representative_name, business_open_date, organization_name, corporation_number, business_address]
+    produces: [business_registration_number, valid_status, business_status, tax_type, status_code, result_message]
+    entities: [Organization, Person, BusinessRegistration]
+    relations: [Organization_IDENTIFIED_BY_Identifier]
+    join_keys: [business_registration_number, corporation_number, organization_name]
+    description_ko: "국세청 사업자등록정보 진위확인 API입니다."
+
+  check_business_status:
+    consumes: [business_registration_number]
+    produces: [business_registration_number, business_status, tax_type, status_code, result_message]
+    entities: [Organization, BusinessRegistration]
+    relations: [Organization_IDENTIFIED_BY_Identifier]
+    join_keys: [business_registration_number]
+    description_ko: "국세청 사업자등록 상태조회 API입니다."
+
+  get_cadastral_features:
+    consumes: [pnu, geometry, coordinate_reference_system, page_number, page_size]
+    produces: [pnu, parcel_address, lot_number, land_price, geometry, coordinate_reference_system]
+    entities: [Parcel, Location]
+    relations: [Parcel_LOCATED_IN_Location]
+    join_keys: [pnu, parcel_address]
+    description_ko: "VWorld 연속지적도 도형과 필지 속성을 조회합니다."
+
+  get_cadastral_schema:
+    consumes: []
+    produces: [pnu, parcel_address, lot_number, land_price, geometry]
+    entities: [Parcel, Document]
+    relations: []
+    join_keys: [pnu]
+    description_ko: "VWorld 연속지적도 데이터 타입 또는 스키마를 조회합니다."
+
+  get_asos_hourly_observation:
+    consumes: [observation_datetime, weather_area_code, page_number, page_size]
+    produces: [observation_datetime, weather_area_code, forecast_value]
+    entities: [Location, WeatherObservation, Measurement]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_area_code, observation_datetime]
+    description_ko: "기상청 지상 종관 ASOS 시간자료를 조회합니다."
+
+  get_asos_daily_observation:
+    consumes: [observation_datetime, weather_area_code, page_number, page_size]
+    produces: [observation_datetime, weather_area_code, forecast_value]
+    entities: [Location, WeatherObservation, Measurement]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_area_code, observation_datetime]
+    description_ko: "기상청 지상 종관 ASOS 일자료를 조회합니다."
+
+  get_weather_warning:
+    consumes: [weather_area_code, observation_datetime, page_number, page_size]
+    produces: [weather_area_code, observation_datetime, weather_warning_code, weather_warning_message]
+    entities: [Location, WeatherObservation]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_area_code]
+    description_ko: "기상청 기상특보, 특보문, 기상정보, 속보, 예비특보와 특보구역 정보를 조회합니다."
+
+  get_tour_weather_forecast:
+    consumes: [weather_area_code, observation_datetime, page_number, page_size]
+    produces: [weather_area_code, observation_datetime, forecast_value]
+    entities: [Location, WeatherObservation]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_area_code, observation_datetime]
+    description_ko: "관광코스별 관광지 상세 기상 정보를 조회합니다."
+
+  get_mid_forecast:
+    consumes: [weather_area_code, observation_datetime, page_number, page_size]
+    produces: [weather_area_code, observation_datetime, forecast_value]
+    entities: [Location, WeatherObservation]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_area_code, observation_datetime]
+    description_ko: "기상청 중기육상예보, 중기기온조회, 중기해상예보를 조회합니다."
+
+  get_short_forecast:
+    consumes: [weather_grid_x, weather_grid_y, observation_datetime, page_number, page_size]
+    produces: [weather_grid_x, weather_grid_y, observation_datetime, forecast_category, forecast_value]
+    entities: [Location, WeatherObservation, Measurement]
+    relations: [Location_HAS_WeatherObservation]
+    join_keys: [weather_grid_x, weather_grid_y, observation_datetime]
+    description_ko: "기상청 초단기실황, 초단기예보, 단기예보를 조회합니다."
+
+  get_financial_summary:
+    consumes: [corporation_number, fiscal_year, page_number, page_size]
+    produces: [corporation_number, organization_name, fiscal_year, financial_revenue, total_assets, operating_profit, net_income]
+    entities: [Organization, FinancialStatement]
+    relations: [Organization_HAS_FinancialStatement]
+    join_keys: [corporation_number, organization_name, fiscal_year]
+    description_ko: "기업 요약재무제표를 조회합니다."
+
+  get_income_statement:
+    consumes: [corporation_number, fiscal_year, page_number, page_size]
+    produces: [corporation_number, organization_name, fiscal_year, financial_revenue, operating_profit, net_income]
+    entities: [Organization, FinancialStatement]
+    relations: [Organization_HAS_FinancialStatement]
+    join_keys: [corporation_number, organization_name, fiscal_year]
+    description_ko: "기업 손익계산서를 조회합니다."
+
+  search_procurement_contracts:
+    consumes: [inquiry_basis, contract_date, registration_datetime, contract_id, procurement_category, page_number, page_size]
+    produces: [contract_id, confirmed_contract_number, contract_name, contract_amount, contract_date, procurement_category, organization_name, organization_code, bid_notice_id, business_registration_number]
+    entities: [Contract, Organization]
+    relations: [Organization_WON_Contract, Organization_ISSUED_Contract]
+    join_keys: [contract_id, business_registration_number, organization_name, bid_notice_id]
+    description_ko: "나라장터 계약현황 목록을 물품, 공사, 용역, 외자 업무별로 조회합니다."
+
+  get_procurement_contract_detail:
+    consumes: [contract_id, procurement_category]
+    produces: [contract_id, confirmed_contract_number, contract_reference_number, contract_name, contract_amount, contract_date, organization_name, business_registration_number]
+    entities: [Contract, Organization]
+    relations: [Organization_WON_Contract, Organization_ISSUED_Contract]
+    join_keys: [contract_id, business_registration_number, organization_name]
+    description_ko: "나라장터 계약현황 상세 정보를 조회합니다."
+
+  search_procurement_contracts_by_conditions:
+    consumes: [contract_date, contract_id, bid_notice_id, organization_name, request_number, procurement_category, page_number, page_size]
+    produces: [contract_id, contract_name, contract_amount, contract_date, organization_name, business_registration_number, bid_notice_id]
+    entities: [Contract, Organization, Document]
+    relations: [Organization_WON_Contract, Organization_ISSUED_Contract]
+    join_keys: [contract_id, business_registration_number, organization_name, bid_notice_id]
+    description_ko: "나라장터 검색조건으로 계약현황을 조회합니다."
+
+  search_procurement_contract_change_history:
+    consumes: [registration_datetime, contract_id, procurement_category, page_number, page_size]
+    produces: [contract_id, confirmed_contract_number, contract_reference_number, registration_datetime, change_datetime]
+    entities: [Contract]
+    relations: []
+    join_keys: [contract_id]
+    description_ko: "나라장터 계약 변경 이력을 조회합니다."
+
+  search_procurement_contract_delete_history:
+    consumes: [registration_datetime, contract_id, procurement_category, page_number, page_size]
+    produces: [contract_id, confirmed_contract_number, contract_reference_number, registration_datetime, change_datetime, deletion_datetime]
+    entities: [Contract]
+    relations: []
+    join_keys: [contract_id]
+    description_ko: "나라장터 계약 삭제 이력을 조회합니다."
+
+  get_exchange_rate:
+    consumes: [event_date, exchange_currency_code]
+    produces: [event_date, exchange_currency_code, exchange_rate]
+    entities: [Measurement]
+    relations: []
+    join_keys: [event_date, exchange_currency_code]
+    description_ko: "한국수출입은행 환율 정보를 조회합니다."
+
+  get_air_quality_realtime:
+    consumes: [station_name, page_number, page_size]
+    produces: [station_name, station_code, observation_datetime, air_quality_index, air_quality_grade, main_pollutant, pm10_value, pm25_value, pollutant_value]
+    entities: [Location, AirQualityObservation, Measurement]
+    relations: [Location_HAS_AirQualityObservation]
+    join_keys: [station_name, station_code]
+    description_ko: "에어코리아 측정소별 실시간 통합대기환경지수와 오염물질 농도를 조회합니다."

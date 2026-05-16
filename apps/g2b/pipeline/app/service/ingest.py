@@ -48,18 +48,23 @@ def run_g2b_bid_initial_ingest(
         )
 
 
-def run_g2b_bid_realtime_ingest_once(now: datetime | None = None) -> dict[str, Any]:
-    lookback_minutes = int(os.getenv("G2B_INGEST_REALTIME_LOOKBACK_MINUTES", "90"))
+def run_g2b_bid_5min_ingest_once(now: datetime | None = None) -> dict[str, Any]:
+    lookback_minutes = int(
+        os.getenv(
+            "G2B_BID_5MIN_LOOKBACK_MINUTES",
+            os.getenv("G2B_INGEST_REALTIME_LOOKBACK_MINUTES", "180"),
+        )
+    )
     window = compute_realtime_window_value(now, lookback_minutes=lookback_minutes)
-    return process_realtime_window(window, use_prefect_tasks=False)
+    return process_5min_window(window, use_prefect_tasks=False)
 
 
-def process_realtime_window(window: dict[str, str], *, use_prefect_tasks: bool) -> dict[str, Any]:
+def process_5min_window(window: dict[str, str], *, use_prefect_tasks: bool) -> dict[str, Any]:
     with g2b_bid_ingest_run_lock() as acquired:
         if not acquired:
-            return skipped_by_running_ingest(flow="g2b-bid-realtime-ingest", window=window)
+            return skipped_by_running_ingest(flow="g2b-bid-5min-ingest", window=window)
         return run_ingest_window(
-            flow_name="g2b-bid-realtime-ingest",
+            flow_name="g2b-bid-5min-ingest",
             window=G2BIngestWindow(begin=window["begin"], end=window["end"]),
             use_prefect_tasks=use_prefect_tasks,
         )

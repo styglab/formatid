@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Any
+from urllib.request import Request, urlopen
 
 import psycopg
 from psycopg.rows import dict_row
+
+from apps.g2b.schema import (
+    BID_NOTICE_TABLE,
+    CONTRACT_COMPANY_TABLE,
+    CONTRACT_DEMAND_ORG_TABLE,
+    CONTRACT_TABLE,
+    DEFAULT_SCHEMA,
+    LICENSE_CONSTRAINT_TABLE,
+    PARTICIPATION_REGION_TABLE,
+    PROCUREMENT_COMPANY_INDUSTRY_TABLE,
+    PROCUREMENT_COMPANY_TABLE,
+    SUCCESSFUL_BID_TABLE,
+)
 
 
 async def build_summary(*, redis_url: str, checkpoint_database_url: str) -> dict[str, Any]:
@@ -18,66 +33,100 @@ def _build_summary_sync() -> dict[str, Any]:
     if not database_url:
         return _unavailable_summary("G2B_INGEST_DATABASE_URL is not configured")
 
-    schema_name = os.getenv("G2B_NORMALIZED_SCHEMA", "g2b")
-    normalized_table = os.getenv("G2B_NORMALIZED_TABLE", "bid_public_notice")
-    raw_table = os.getenv("G2B_INGEST_TABLE", "bid_public_notice_raw")
-    license_table = os.getenv("G2B_LICENSE_LIMIT_NORMALIZED_TABLE", "bid_public_notice_license_limit")
-    region_table = os.getenv("G2B_PARTICIPATION_REGION_NORMALIZED_TABLE", "bid_public_notice_participation_region")
-    success_bid_table = os.getenv("G2B_SUCCESS_BID_NORMALIZED_TABLE", "successful_bid")
+    schema_name = os.getenv("G2B_NORMALIZED_SCHEMA", DEFAULT_SCHEMA)
+    normalized_table = os.getenv("G2B_NORMALIZED_TABLE", BID_NOTICE_TABLE.normalized_table)
+    raw_table = os.getenv("G2B_INGEST_TABLE", BID_NOTICE_TABLE.raw_table or "bid_public_notice_raw")
+    license_table = os.getenv("G2B_LICENSE_LIMIT_NORMALIZED_TABLE", LICENSE_CONSTRAINT_TABLE.normalized_table)
+    region_table = os.getenv("G2B_PARTICIPATION_REGION_NORMALIZED_TABLE", PARTICIPATION_REGION_TABLE.normalized_table)
+    success_bid_table = os.getenv("G2B_SUCCESS_BID_NORMALIZED_TABLE", SUCCESSFUL_BID_TABLE.normalized_table)
+    company_table = os.getenv("G2B_COMPANY_NORMALIZED_TABLE", PROCUREMENT_COMPANY_TABLE.normalized_table)
+    company_industry_table = os.getenv(
+        "G2B_COMPANY_INDUSTRY_NORMALIZED_TABLE",
+        PROCUREMENT_COMPANY_INDUSTRY_TABLE.normalized_table,
+    )
+    contract_table = os.getenv("G2B_CONTRACT_NORMALIZED_TABLE", CONTRACT_TABLE.normalized_table)
+    contract_company_table = os.getenv("G2B_CONTRACT_COMPANY_TABLE", CONTRACT_COMPANY_TABLE.normalized_table)
+    contract_demand_org_table = os.getenv(
+        "G2B_CONTRACT_DEMAND_ORG_TABLE",
+        CONTRACT_DEMAND_ORG_TABLE.normalized_table,
+    )
+
+    table_specs = [
+        ("bid_public_notice_raw", raw_table),
+        ("bid_public_notice", normalized_table),
+        ("bid_public_notice_license_limit_raw", LICENSE_CONSTRAINT_TABLE.raw_table or "bid_public_notice_license_limit_raw"),
+        ("bid_public_notice_license_limit", license_table),
+        (
+            "bid_public_notice_participation_region_raw",
+            PARTICIPATION_REGION_TABLE.raw_table or "bid_public_notice_participation_region_raw",
+        ),
+        ("bid_public_notice_participation_region", region_table),
+        ("successful_bid_raw", SUCCESSFUL_BID_TABLE.raw_table or "successful_bid_raw"),
+        ("successful_bid", success_bid_table),
+        ("procurement_company_raw", PROCUREMENT_COMPANY_TABLE.raw_table or "procurement_company_raw"),
+        ("procurement_company", company_table),
+        (
+            "procurement_company_industry_raw",
+            PROCUREMENT_COMPANY_INDUSTRY_TABLE.raw_table or "procurement_company_industry_raw",
+        ),
+        ("procurement_company_industry", company_industry_table),
+        ("contract_raw", CONTRACT_TABLE.raw_table or "contract_raw"),
+        ("contract", contract_table),
+        ("contract_company", contract_company_table),
+        ("contract_demand_organization", contract_demand_org_table),
+    ]
 
     try:
         with psycopg.connect(database_url, row_factory=dict_row) as conn:
-            normalized = _table_stats(conn, schema_name=schema_name, table_name=normalized_table)
-            raw = _table_stats(conn, schema_name=schema_name, table_name=raw_table)
-            licenses = _table_stats(conn, schema_name=schema_name, table_name=license_table)
-            regions = _table_stats(conn, schema_name=schema_name, table_name=region_table)
-            success_bids = _table_stats(conn, schema_name=schema_name, table_name=success_bid_table)
-            category_counts = _category_counts(conn, schema_name=schema_name, table_name=normalized_table)
-            success_bid_category_counts = _category_counts(conn, schema_name=schema_name, table_name=success_bid_table)
-            allowed_industries = _allowed_industry_count(conn, schema_name=schema_name, table_name=license_table)
+            table_stats = [
+                {
+                    "name": display_name,
+                    "table": table_name,
+                    **_table_stats(conn, schema_name=schema_name, table_name=table_name),
+                }
+                for display_name, table_name in table_specs
+            ]
+            pipeline_runs = _prefect_pipeline_runs()
     except Exception as exc:
         return _unavailable_summary(str(exc))
+
+    failed_pipelines = [run for run in pipeline_runs if run["status"] in {"FAILED", "CRASHED", "CANCELLED"}]
+    healthy_pipelines = [run for run in pipeline_runs if run["status"] == "COMPLETED"]
+    app_status = "degraded" if failed_pipelines else "healthy"
 
     return {
         "app": "g2b.pipeline",
         "title": "G2B Pipeline",
-        "status": "healthy",
-        "description": "G2B canonical and semantic data readiness",
+        "status": app_status,
+        "description": "G2B pipeline table freshness and flow status",
         "metrics": [
-            {"label": "Raw notices", "value": raw["count"], "detail": raw["latest"]},
-            {"label": "Normalized notices", "value": normalized["count"], "detail": normalized["latest"]},
-            {"label": "License constraints", "value": licenses["count"], "detail": licenses["latest"]},
-            {"label": "Allowed industries", "value": allowed_industries},
-            {"label": "Participation regions", "value": regions["count"], "detail": regions["latest"]},
-            {"label": "Successful bids", "value": success_bids["count"], "detail": success_bids["latest"]},
+            {"label": "Tables", "value": len(table_stats)},
+            {"label": "Total Rows", "value": sum(row["count"] for row in table_stats)},
+            {"label": "Pipelines", "value": len(pipeline_runs)},
+            {"label": "Healthy Pipelines", "value": len(healthy_pipelines), "detail": f"{len(failed_pipelines)} failed latest"},
         ],
         "sections": [
             {
-                "title": "Freshness",
+                "title": "Data Tables",
                 "rows": [
-                    {"name": "Raw latest", "value": raw["latest"] or "-"},
-                    {"name": "Normalized latest", "value": normalized["latest"] or "-"},
-                    {"name": "License latest", "value": licenses["latest"] or "-"},
-                    {"name": "Region latest", "value": regions["latest"] or "-"},
-                    {"name": "Success bid latest", "value": success_bids["latest"] or "-"},
+                    {
+                        "name": row["name"],
+                        "value": row["count"],
+                        "freshness": row["latest"],
+                    }
+                    for row in table_stats
                 ],
             },
             {
-                "title": "Category Counts",
-                "rows": [{"name": row["category"] or "unknown", "value": row["count"]} for row in category_counts],
-            },
-            {
-                "title": "Success Bid Category Counts",
-                "rows": [{"name": row["category"] or "unknown", "value": row["count"]} for row in success_bid_category_counts],
-            },
-            {
-                "title": "Semantic Coverage",
+                "title": "Pipeline Runs",
                 "rows": [
-                    {"name": "requires", "value": licenses["count"]},
-                    {"name": "allows_industry", "value": allowed_industries},
-                    {"name": "restricted_to", "value": regions["count"]},
-                    {"name": "categorized_as", "value": normalized["count"]},
-                    {"name": "awarded_to", "value": success_bids["count"]},
+                    {
+                        "name": run["flow"],
+                        "value": run["status"],
+                        "last_run_at": run["last_run_at"],
+                        "detail": run["detail"],
+                    }
+                    for run in pipeline_runs
                 ],
             },
         ],
@@ -113,33 +162,64 @@ def _table_stats(conn: psycopg.Connection, *, schema_name: str, table_name: str)
     }
 
 
-def _category_counts(conn: psycopg.Connection, *, schema_name: str, table_name: str) -> list[dict[str, Any]]:
-    if not _table_exists(conn, schema_name=schema_name, table_name=table_name):
+def _prefect_pipeline_runs() -> list[dict[str, Any]]:
+    api_url = os.getenv("PREFECT_API_URL")
+    if not api_url:
         return []
-    with conn.cursor() as cursor:
-        cursor.execute(
-            f'''
-            SELECT category, COUNT(*) AS count
-            FROM "{schema_name}"."{table_name}"
-            GROUP BY category
-            ORDER BY count DESC, category
-            '''
-        )
-        return [{"category": row["category"], "count": int(row["count"])} for row in cursor.fetchall()]
+    flow_names = [
+        "g2b-bid-5min-ingest",
+        "g2b-success-bid-5min-ingest",
+        "g2b-contract-hourly-ingest",
+        "g2b-contract-daily-reconcile",
+        "g2b-bid-initial-ingest",
+        "g2b-success-bid-initial-ingest",
+        "g2b-contract-initial-ingest",
+    ]
+    return [_prefect_latest_flow_run(api_url=api_url, flow_name=flow_name) for flow_name in flow_names]
 
 
-def _allowed_industry_count(conn: psycopg.Connection, *, schema_name: str, table_name: str) -> int:
-    if not _table_exists(conn, schema_name=schema_name, table_name=table_name):
-        return 0
-    with conn.cursor() as cursor:
-        cursor.execute(
-            f'''
-            SELECT COALESCE(SUM(jsonb_array_length(allowed_industries)), 0) AS count
-            FROM "{schema_name}"."{table_name}"
-            '''
-        )
-        row = cursor.fetchone() or {}
-    return int(row.get("count") or 0)
+def _prefect_latest_flow_run(*, api_url: str, flow_name: str) -> dict[str, Any]:
+    payload = {
+        "flows": {"name": {"any_": [flow_name]}},
+        "flow_runs": {
+            "state": {
+                "type": {
+                    "any_": ["COMPLETED", "FAILED", "RUNNING", "CRASHED", "CANCELLED"],
+                }
+            }
+        },
+        "sort": "START_TIME_DESC",
+        "limit": 1,
+    }
+    request = Request(
+        f"{api_url.rstrip('/')}/flow_runs/filter",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=3) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return {
+            "flow": flow_name,
+            "status": "UNKNOWN",
+            "last_run_at": None,
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+    if not rows:
+        return {
+            "flow": flow_name,
+            "status": "UNKNOWN",
+            "last_run_at": None,
+            "detail": "no finished or running flow run",
+        }
+    row = rows[0]
+    return {
+        "flow": flow_name,
+        "status": row.get("state_type") or row.get("state_name") or "UNKNOWN",
+        "last_run_at": row.get("start_time") or row.get("expected_start_time") or row.get("created"),
+        "detail": row.get("name"),
+    }
 
 
 def _table_exists(conn: psycopg.Connection, *, schema_name: str, table_name: str) -> bool:
