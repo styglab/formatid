@@ -1,1 +1,9 @@
-"""Source ingestion graph for semantic catalog proposals."""
+__all__ = ["run_source_ingestion"]
+
+
+def __getattr__(name: str):
+    if name == "run_source_ingestion":
+        from services.semantic_platform.ingestion.graph import run_source_ingestion
+
+        return run_source_ingestion
+    raise AttributeError(name)

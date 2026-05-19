@@ -5,21 +5,28 @@ from fastapi import FastAPI, HTTPException
 from services.semantic_platform.api.app.domain.service import (
     apply_proposal,
     catalog_metadata,
-    find_capabilities,
-    list_domains,
+    embed_capability_documents,
+    list_capability_documents,
+    list_evidence_snapshots,
+    list_execution_graphs,
     list_proposals,
+    list_planner_feedback,
     list_sources,
     load_execution_contracts,
     load_catalog,
-    plan_join,
+    load_catalog_section,
     read_proposal,
+    list_endpoint_checks,
+    record_endpoint_check,
+    record_planner_feedback,
     reject_proposal,
-    resolve,
+    rebuild_capability_documents,
+    retrieve_capabilities,
     runtime_context,
     sources_summary,
+    upsert_execution_graph,
 )
-from services.semantic_platform.planner.intent_parser import parse_intent
-from services.semantic_platform.planner.execution_planner import plan_execution
+from services.semantic_platform.planner import plan_execution
 
 
 app = FastAPI(title="Semantic Platform API", version="0.1.0")
@@ -38,20 +45,101 @@ def read_catalog() -> dict:
 @app.get("/catalog")
 def read_dashboard_catalog() -> dict:
     catalog = load_catalog()
-    runtime = catalog.get("runtime", {})
     return {
-        "fields": runtime.get("semantic_types", {}),
-        "entities": runtime.get("entities", {}),
-        "relationships": runtime.get("relations", {}),
-        "capabilities": runtime.get("capabilities", {}),
-        "vocabulary": catalog.get("mappings", {}).get("crosswalks", {}),
-        "workflows": catalog.get("resources", {}).get("resources", {}),
+        "semantic_types": catalog.get("semantic_types", {}),
+        "capabilities": catalog.get("capabilities", {}),
+        "resources": catalog.get("resources", {}),
+        "operations": catalog.get("operations", {}),
+        "operation_contracts": catalog.get("operation_contracts", {}),
+        "operation_variants": catalog.get("operation_variants", {}),
+        "field_mappings": catalog.get("field_mappings", {}),
+        "capability_implementations": catalog.get("capability_implementations", []),
+        "capability_documents": catalog.get("capability_documents", {}),
     }
+
+
+@app.get("/catalog/sections/{section}")
+def read_dashboard_catalog_section(section: str, limit: int = 100, offset: int = 0, q: str | None = None) -> dict:
+    try:
+        return load_catalog_section(section=section, limit=limit, offset=offset, q=q)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown catalog section: {section}") from exc
 
 
 @app.get("/semantic/execution/contracts")
 def read_execution_contracts() -> dict:
     return load_execution_contracts()
+
+
+@app.get("/semantic/capability-documents")
+def read_capability_documents(limit: int = 100) -> dict:
+    return list_capability_documents(limit=limit)
+
+
+@app.post("/semantic/capability-documents/rebuild")
+def rebuild_capability_documents_post() -> dict:
+    return rebuild_capability_documents()
+
+
+@app.post("/semantic/capability-documents/embed")
+def embed_capability_documents_post(document: dict | None = None) -> dict:
+    payload = document or {}
+    return embed_capability_documents(
+        limit=int(payload.get("limit", 100)),
+        force=bool(payload.get("force", False)),
+        capability_ids=payload.get("capability_ids") if isinstance(payload.get("capability_ids"), list) else None,
+        document_ids=payload.get("document_ids") if isinstance(payload.get("document_ids"), list) else None,
+    )
+
+
+@app.post("/semantic/capabilities/retrieve")
+def retrieve_capabilities_post(document: dict) -> dict:
+    return retrieve_capabilities(str(document.get("query", "")), int(document.get("limit", 10)))
+
+
+@app.get("/semantic/execution/checks")
+def read_endpoint_checks(
+    operation_id: str | None = None,
+    variant_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    return list_endpoint_checks(operation_id=operation_id, variant_id=variant_id, limit=limit)
+
+
+@app.post("/semantic/execution/checks")
+def record_endpoint_check_post(document: dict) -> dict:
+    try:
+        return record_endpoint_check(document)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"missing field: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/planner/execution-graphs")
+def read_execution_graphs(limit: int = 100) -> dict:
+    return list_execution_graphs(limit=limit)
+
+
+@app.post("/planner/execution-graphs")
+def upsert_execution_graph_post(document: dict) -> dict:
+    try:
+        return upsert_execution_graph(document)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"missing field: {exc}") from exc
+
+
+@app.get("/semantic/governance/feedback")
+def read_planner_feedback(limit: int = 100) -> dict:
+    return list_planner_feedback(limit=limit)
+
+
+@app.post("/semantic/governance/feedback")
+def record_planner_feedback_post(document: dict) -> dict:
+    try:
+        return record_planner_feedback(document)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"missing field: {exc}") from exc
 
 
 @app.get("/semantic/meta")
@@ -72,6 +160,11 @@ def read_sources() -> dict:
 @app.get("/sources/summary")
 def read_sources_summary() -> dict:
     return sources_summary()
+
+
+@app.get("/sources/evidence")
+def read_source_evidence_snapshots(source_document_id: str | None = None, limit: int = 100) -> dict:
+    return list_evidence_snapshots(source_document_id=source_document_id, limit=limit)
 
 
 @app.get("/proposals")
@@ -109,38 +202,6 @@ def reject_proposal_post(proposal_id: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/semantic/domains")
-def read_domains() -> dict:
-    return list_domains()
-
-
-@app.get("/semantic/resolve")
-def resolve_get(q: str, limit: int = 10) -> dict:
-    return resolve(q, limit)
-
-
-@app.post("/semantic/resolve")
-def resolve_post(document: dict) -> dict:
-    return resolve(str(document.get("query", "")), int(document.get("limit", 10)))
-
-
-@app.post("/semantic/capabilities/find")
-def find_capabilities_post(document: dict) -> dict:
-    properties = document.get("properties", [])
-    if not isinstance(properties, list):
-        properties = []
-    return find_capabilities(
-        entity=document.get("entity"),
-        properties=[str(value) for value in properties],
-        limit=int(document.get("limit", 20)),
-    )
-
-
-@app.post("/semantic/join/plan")
-def plan_join_post(document: dict) -> dict:
-    return plan_join(str(document.get("from_entity", "")), str(document.get("to_entity", "")))
-
-
 @app.post("/planner/plan")
 def plan_query_post(document: dict) -> dict:
     manual_plan = document.get("manual_plan")
@@ -159,21 +220,6 @@ def plan_execution_post(document: dict) -> dict:
         int(document.get("limit", 12)),
         manual_plan if isinstance(manual_plan, dict) else None,
     )
-
-
-@app.post("/planner/intent")
-def parse_intent_post(document: dict) -> dict:
-    query = str(document.get("query", ""))
-    context = runtime_context(query, int(document.get("limit", 8)))["runtime_context"]
-    manual_intent = document.get("manual_intent")
-    return {
-        "query": query,
-        "semantic_intent": parse_intent(
-            query,
-            context,
-            manual_intent if isinstance(manual_intent, dict) else None,
-        ),
-    }
 
 
 @app.post("/runtime/context")

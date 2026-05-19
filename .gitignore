@@ -9,6 +9,7 @@ infra/qdrant/storage/
 .codex
 sources/
 data/
+models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

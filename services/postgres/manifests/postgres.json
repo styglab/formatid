@@ -1,6 +1,6 @@
 {
   "service_name": "postgres",
-  "image": "postgres:16-alpine",
+  "image": "pgvector/pgvector:pg16",
   "command": [
     "postgres",
     "-c",
@@ -11,7 +11,7 @@
     "deploy/compose/env/postgres.env"
   ],
   "ports": [
-    "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
+    "${POSTGRES_HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
   ],
   "volumes": [
     "${POSTGRES_DATA_DIR:-../../data/postgres}:/var/lib/postgresql/data",
