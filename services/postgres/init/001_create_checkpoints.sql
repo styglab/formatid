@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS checkpoints (
     name TEXT PRIMARY KEY,
     value JSONB NOT NULL DEFAULT '{}'::jsonb,

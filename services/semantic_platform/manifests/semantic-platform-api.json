@@ -11,6 +11,9 @@
   "ports": [
     "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_API_HOST_PORT:-8016}:8000"
   ],
+  "depends_on_service_healthy": [
+    "embedding-service"
+  ],
   "healthcheck": {
     "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"],
     "interval": "10s",

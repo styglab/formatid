@@ -55,18 +55,34 @@ Current apps:
 
 `services/semantic_platform` is declarative semantic intelligence:
 
-- semantic source of truth under `catalog/*`
+- Postgres-backed semantic source of truth
+- capability catalog for retrieval-first tool routing
+- capability embeddings/vector index ownership
 - `SemanticType`, small `Entity`, `Relation`, and semantic `Capability` definitions
 - capability graph and semantic execution DAG planning
 - runtime context packaging for LLM/MCP planners
 - semantic join rules expressed by semantic identifiers
-- reviewed execution contracts under `catalog/execution/*`
+- reviewed execution contracts stored in Postgres `sp_operation_contracts`
   - capability -> provider/tool implementation metadata
   - raw provider field -> `SemanticType` mappings
 - LLM-first execution planning:
   - select `operation_id` values from approved operation contracts
   - produce semantic arguments, argument bindings, post filters, and integration plans
   - describe what to execute and how semantic data flows between steps
+
+Catalog concerns must stay separate:
+
+- Capability Catalog: retrieval-facing capability metadata, examples, aliases,
+  inputs, outputs, and tags
+- Execution Catalog: resources, operations, contracts, variants, field mappings,
+  implementations, and endpoint checks
+- Governance Context: naming decisions, conflicts, lineage, review status, and
+  merge/deprecation decisions
+
+`load_catalog_context` in ingestion is a context-packaging step that gives the
+LLM existing capability catalog, execution summary, and governance context
+before it proposes changes. It is not a runtime planner and not a separate
+catalog.
 
 It must not contain imperative provider execution code:
 
@@ -90,11 +106,11 @@ It must not own cross-domain planning, global capability ranking, semantic
 join-path reasoning, proposal generation, catalog mutation, canonical semantic
 definitions, or provider-selection rules such as "공사 means this PPS operation".
 
-Capability ids in `services/semantic_platform/catalog/capabilities.yaml` must be
-provider-neutral, for example `search_contracts`, not `pps.search_contracts`.
-Provider/tool implementation mappings and provider field mappings belong in
-`services/semantic_platform/catalog/execution/*` as approved declarative contracts.
-`pubdata_mcp` may read those contracts, but must not own them.
+Capability ids in semantic_platform must be provider-neutral, for example
+`search_contracts`, not `pps.search_contracts`. Provider/tool implementation
+mappings and provider field mappings belong in semantic_platform Postgres
+tables as approved declarative contracts. `pubdata_mcp` may read those
+contracts through `/semantic/execution/contracts`, but must not own them.
 `apps/pubdata_mcp/specs/*` is only for MCP tool specs with top-level `tools`.
 
 Planner and executor contract:
@@ -118,10 +134,35 @@ Client question
 - post filters
 - semantic integration plan
 
+Planner capability coverage is an LLM judgment, not a deterministic
+keyword/rule system. Runtime code must not hard-code domain or intent rules
+such as "공사 means construction", "변경 이력 means change_history", or
+"if these Korean words are present then this capability is missing." Retrieval
+may provide candidate capability documents and approved variants, and validation
+may verify that selected ids exist in the supplied context, but deciding whether
+the retrieved candidates actually satisfy the user's question, or whether no
+capability is sufficient, belongs to the LLM planner response.
+
+When no retrieved capability satisfies the user's requested meaning, the LLM
+planner should return an explicit not-found plan rather than selecting the
+nearest partial match:
+
+```json
+{
+  "planner": {"status": "not_found", "reason": "capability_not_found"},
+  "execution_graph": {"type": "dag", "status": "not_found", "nodes": []},
+  "errors": [{"code": "capability_not_found"}]
+}
+```
+
 Operation contracts must model provider control parameters declaratively. For
 example, parameters such as `inqryDiv` must not be hard-coded in executor code
 or added as unconditional defaults when the API spec defines multiple meanings.
-Represent them as planner-selected semantic controls:
+They are operation-local control fields. The same raw name can mean different
+things in different operations, so LLM ingestion must interpret them from the
+current operation's request table, descriptions, examples, and endpoint
+verification evidence. Represent them as planner-selected semantic controls or,
+when one physical endpoint has several meanings, as separate operation variants:
 
 ```yaml
 inqryDiv:
@@ -134,6 +175,35 @@ inqryDiv:
 
 The LLM planner chooses `inquiry_basis`; `pubdata_mcp` only applies the
 declared `enum_mapping`.
+
+If one endpoint can produce multiple semantic capabilities depending on fixed
+control values, model it as:
+
+```text
+operation_contract
+  -> operation_variant
+    -> capability_implementation
+```
+
+Each `operation_variant` has its own `variant_id`, `capability_id`,
+`fixed_semantic_arguments`, `fixed_raw_arguments`, and verification sample.
+Planner output should prefer `variant_id`; `pubdata_mcp` must execute the
+selected variant without guessing provider choices. Endpoint checks must be
+stored per capability/variant, not only per physical endpoint.
+
+During source ingestion, the graph must expose operation-scoped
+`operation_variant_candidates` to the LLM when control fields are found. The LLM
+decides whether values such as `1`, `2`, or `A` are separate capabilities based
+on evidence. Runtime code must not contain branches like "if inqryDiv is 1 then
+contract-date search"; that belongs in reviewed catalog data as a variant.
+
+Source ingestion proposals must be capability-scoped review units. A source
+run may create many proposals shaped as
+`proposal.<source_document_id>.<capability_id>.review`; source evidence
+snapshots remain source-scoped. Capability proposals must carry provenance that
+lets reviewers trace the capability to source document, source sections,
+operation ids, variant ids, endpoint method/path metadata, and evidence
+snapshot id.
 
 `apps/pubdata_mcp` must not infer these choices from Korean/provider terms.
 It executes selected operation contracts, handles auth/retry/pagination/HTTP,
@@ -175,8 +245,8 @@ When `LLM_MODE=codex_manual` during development:
 - manual reasoning must not be converted into hard-coded provider rules,
   field mappings, or catalog mutations inside graph/runtime code
 
-This applies to source ingestion, semantic mapping, intent parsing, proposal
-generation, and any future LLM-assisted planning path.
+This applies to source ingestion, semantic mapping, proposal generation,
+execution planning, and any future LLM-assisted planning path.
 
 ## Rules
 

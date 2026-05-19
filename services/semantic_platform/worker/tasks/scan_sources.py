@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_PATTERNS = ("*.md", "*.txt", "*.docx", "*.json", "*.yaml", "*.yml", "*.html", "*.xml", "*.zip")
-SKIP_PARTS = {"proposals", "chunks", "codex_manual_llm", "codex_manual_intents", "__pycache__"}
+DEFAULT_PATTERNS = ("*.md", "*.txt", "*.docx", "*.html", "*.xml", "*.zip")
+SKIP_PARTS = {"proposals", "__pycache__"}
 
 
 def scan_sources(root: str | Path = "sources", patterns: tuple[str, ...] = DEFAULT_PATTERNS) -> list[dict[str, Any]]:

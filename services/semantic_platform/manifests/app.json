@@ -24,6 +24,7 @@
       "semantic-platform-api",
       "semantic-platform-dashboard",
       "semantic-platform-worker",
+      "embedding-service",
       "prefect-server",
       "prefect-services"
     ]

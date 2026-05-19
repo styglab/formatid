@@ -13,6 +13,7 @@ def _process_job_variables() -> dict[str, object]:
         "working_dir": os.getenv("PREFECT_FLOW_WORKING_DIR", "/app"),
         "env": {
             "PREFECT_HOME": os.getenv("PREFECT_HOME", "/tmp/prefect"),
+            "SEMANTIC_PLATFORM_DATABASE_URL": os.getenv("SEMANTIC_PLATFORM_DATABASE_URL", ""),
             "LLM_MODE": os.getenv("LLM_MODE", "disabled"),
             "SEMANTIC_PLATFORM_LLM_MODE": os.getenv("SEMANTIC_PLATFORM_LLM_MODE", os.getenv("LLM_MODE", "disabled")),
         },

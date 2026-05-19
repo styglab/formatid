@@ -1,21 +1,93 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
-from typing import Any, Callable
+from time import perf_counter
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
 
-from apps.pubdata_mcp.app.providers.nts.tools import (
-    check_business_status,
-    validate_business_registration,
+
+SENSITIVE_KEY_PARTS = (
+    "authkey",
+    "apikey",
+    "api_key",
+    "servicekey",
+    "service_key",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "password",
 )
-from apps.pubdata_mcp.app.providers.pps.tools import search_contracts
-from apps.pubdata_mcp.app.providers.pps.parsers import contract_companies
 
 
-ToolAdapter = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
+def smoke_test_operation(
+    operation_id: str,
+    semantic_arguments: dict[str, Any],
+    execution_contracts: dict[str, Any],
+    catalog: dict[str, Any] | None = None,
+    persist: bool = True,
+    variant_id: str | None = None,
+) -> dict[str, Any]:
+    operation_variants = execution_contracts.get("operation_variants", {})
+    variant = operation_variants.get(variant_id) if variant_id and isinstance(operation_variants, dict) else {}
+    if variant and not operation_id:
+        operation_id = str(variant.get("operation_id") or "")
+    operation_contract = _operation_contract(execution_contracts.get("operation_contracts", {}), operation_id)
+    if not operation_contract:
+        result = _smoke_result(
+            operation_id=operation_id,
+            variant_id=variant_id,
+            capability_id=str((variant or {}).get("capability") or ""),
+            status="skipped",
+            semantic_arguments=semantic_arguments,
+            error_message="operation_contract_not_found",
+        )
+        return _persist_smoke_result(result) if persist else result
+    capability = str((variant or {}).get("capability") or operation_contract.get("capability") or "")
+    semantic_arguments = {**((variant or {}).get("fixed_semantic_arguments") or {}), **semantic_arguments}
+    plan = {
+        "query": f"smoke test {operation_id}",
+        "execution_graph": {
+            "type": "dag",
+            "status": "planned",
+            "nodes": [
+                {
+                    "id": "smoke",
+                    "capability": capability,
+                    "variant_id": variant_id,
+                    "operation_id": operation_id,
+                    "call": {"semantic_arguments": semantic_arguments},
+                    "argument_bindings": {},
+                    "post_filters": [],
+                }
+            ],
+        },
+    }
+    started = perf_counter()
+    execution = execute_semantic_plan(plan, execution_contracts, catalog)
+    duration_ms = int((perf_counter() - started) * 1000)
+    node_result = (execution.get("results") or [{}])[0]
+    status = str(node_result.get("status") or "skipped")
+    raw_result = node_result.get("result") if isinstance(node_result, dict) else {}
+    error = raw_result.get("error") if isinstance(raw_result, dict) else None
+    result = _smoke_result(
+        operation_id=operation_id,
+        variant_id=variant_id,
+        capability_id=capability,
+        status=status,
+        result_status=node_result.get("result_status"),
+        semantic_arguments=semantic_arguments,
+        raw_arguments=(node_result.get("arguments") or {}).get("raw", {}),
+        response_sample=raw_result if isinstance(raw_result, dict) else {"value": raw_result},
+        normalized_sample=node_result.get("semantic_result", {}),
+        error_message=error.get("message") if isinstance(error, dict) else node_result.get("reason"),
+        duration_ms=duration_ms,
+    )
+    return _persist_smoke_result(result) if persist else result
 
 
 def execute_semantic_plan(
@@ -28,17 +100,23 @@ def execute_semantic_plan(
     implementations = _normalize_implementations(execution_contracts.get("capability_implementations", {}))
     field_mappings = execution_contracts.get("operation_field_mappings", {})
     operation_contracts = execution_contracts.get("operation_contracts", {})
-    resources = (catalog or {}).get("resources", {}).get("resources", {})
+    operation_variants = execution_contracts.get("operation_variants", {})
+    catalog_resources = execution_contracts.get("resources") or (catalog or {}).get("resources", {})
+    resources = catalog_resources.get("resources", {}) if isinstance(catalog_resources.get("resources"), dict) else catalog_resources
     results = []
 
     for node in nodes:
         if not isinstance(node, dict):
             continue
         capability = str(node.get("capability") or "")
+        variant_id = str(node.get("variant_id") or "")
+        variant = operation_variants.get(variant_id) if variant_id and isinstance(operation_variants, dict) else {}
         semantic_arguments = _semantic_arguments_for_node(node, results)
-        operation_id_hint = str(node.get("operation_id") or "")
+        semantic_arguments = {**((variant or {}).get("fixed_semantic_arguments") or {}), **semantic_arguments}
+        operation_id_hint = str(node.get("operation_id") or (variant or {}).get("operation_id") or "")
         operation_contract = _operation_contract(operation_contracts, operation_id_hint)
-        implementation = _select_implementation(capability, implementations, operation_id_hint)
+        capability = capability or str((variant or {}).get("capability") or operation_contract.get("capability") or "")
+        implementation = _select_implementation(capability, implementations, operation_id_hint, variant_id)
         if not implementation and operation_contract:
             implementation = {
                 "operation_id": operation_id_hint,
@@ -49,10 +127,33 @@ def execute_semantic_plan(
                 "method": operation_contract.get("method"),
                 "path": operation_contract.get("path"),
             }
+        elif implementation and operation_contract:
+            implementation = {
+                "resource_id": operation_contract.get("resource_id"),
+                "provider": operation_contract.get("provider"),
+                "method": operation_contract.get("method"),
+                "path": operation_contract.get("path"),
+                **implementation,
+            }
         if not implementation:
             results.append(_skipped(node, "implementation_not_available"))
             continue
-        if not semantic_arguments:
+        fixed_raw_arguments = (variant or {}).get("fixed_raw_arguments") or {}
+        missing_arguments = _missing_required_semantic_arguments(semantic_arguments, operation_contract)
+        if missing_arguments:
+            skipped = _skipped(node, "missing_required_semantic_arguments", implementation)
+            results.append(
+                {
+                    **skipped,
+                    "missing": missing_arguments,
+                    "arguments": {
+                        "semantic": semantic_arguments,
+                        "raw": _redact_secrets(fixed_raw_arguments),
+                    },
+                }
+            )
+            continue
+        if not semantic_arguments and not fixed_raw_arguments:
             results.append(_skipped(node, "missing_semantic_arguments", implementation))
             continue
 
@@ -60,36 +161,32 @@ def execute_semantic_plan(
         request_mappings = _operation_mappings(field_mappings, operation_id, "request")
         response_mappings = _operation_mappings(field_mappings, operation_id, "response")
         raw_arguments = _semantic_to_raw_arguments(semantic_arguments, request_mappings, operation_contract)
+        raw_arguments = {**raw_arguments, **fixed_raw_arguments}
         if not raw_arguments:
             results.append(_skipped(node, "semantic_arguments_not_mappable", implementation))
             continue
-
-        tool_name = _tool_name(capability, implementation)
-        adapter = TOOL_REGISTRY.get(tool_name)
-        if operation_contract and _can_use_generic_http(implementation, resources):
-            adapter = _execute_generic_http
-            tool_name = "generic_http_executor"
-        elif adapter is None and _can_use_generic_http(implementation, resources):
-            adapter = _execute_generic_http
-            tool_name = "generic_http_executor"
-        if adapter is None:
+        validation_errors = _validate_raw_arguments(raw_arguments, operation_contract)
+        if validation_errors:
             results.append(
                 {
-                    **_skipped(node, "not_executable_missing_tool_or_http_metadata", implementation),
-                    "required": ["tool adapter", "or resource base_url + implementation path/method"],
+                    **_skipped(node, "argument_validation_failed", implementation),
+                    "validation_errors": validation_errors,
+                    "arguments": {
+                        "semantic": semantic_arguments,
+                        "raw": _redact_secrets(raw_arguments),
+                    },
                 }
             )
             continue
-        missing_required = _missing_required_raw_arguments(tool_name, raw_arguments)
-        if missing_required:
+
+        if _can_use_generic_http(implementation, resources):
+            adapter = _execute_generic_http
+            tool_name = "generic_http_executor"
+        else:
             results.append(
                 {
-                    **_skipped(node, "missing_required_raw_arguments", implementation),
-                    "missing": missing_required,
-                    "arguments": {
-                        "semantic": semantic_arguments,
-                        "raw": raw_arguments,
-                    },
+                    **_skipped(node, "not_executable_missing_tool_or_http_metadata", implementation),
+                    "required": ["resource base_url", "operation path", "operation method"],
                 }
             )
             continue
@@ -111,7 +208,7 @@ def execute_semantic_plan(
                     "message": str(exc),
                     "arguments": {
                         "semantic": semantic_arguments,
-                        "raw": raw_arguments,
+                        "raw": _redact_secrets(raw_arguments),
                     },
                 }
             )
@@ -120,16 +217,19 @@ def execute_semantic_plan(
             _normalize_response(raw_result, response_mappings, operation_contract),
             node.get("post_filters", []),
         )
+        status = "error" if isinstance(raw_result, dict) and raw_result.get("error") else "executed"
         results.append(
             {
                 "node": node.get("id"),
                 "capability": capability,
-                "status": "error" if isinstance(raw_result, dict) and raw_result.get("error") else "executed",
+                "status": status,
+                "result_status": _result_status(status, raw_result=raw_result, semantic_result=semantic_result),
                 "implementation": _implementation_summary(implementation),
                 "operation_contract": _operation_contract_summary(operation_contract),
+                "variant_id": variant_id or None,
                 "arguments": {
                     "semantic": semantic_arguments,
-                    "raw": raw_arguments,
+                    "raw": _redact_secrets(raw_arguments),
                 },
                 "result": raw_result,
                 "semantic_result": semantic_result,
@@ -153,8 +253,13 @@ def _select_implementation(
     capability: str,
     implementations: dict[str, list[dict[str, Any]]],
     operation_id_hint: str = "",
+    variant_id_hint: str = "",
 ) -> dict[str, Any] | None:
     candidates = implementations.get(capability, [])
+    if variant_id_hint:
+        for item in candidates:
+            if item.get("variant_id") == variant_id_hint:
+                return item
     if operation_id_hint:
         for item in candidates:
             if item.get("operation_id") == operation_id_hint:
@@ -163,14 +268,6 @@ def _select_implementation(
         if item.get("status") == "available" and item.get("tool"):
             return item
     return candidates[0] if candidates else None
-
-
-def _tool_name(capability: str, implementation: dict[str, Any]) -> str:
-    explicit = implementation.get("tool")
-    if explicit:
-        return str(explicit)
-    provider = str(implementation.get("provider") or "")
-    return FALLBACK_TOOL_BY_PROVIDER_CAPABILITY.get((provider, capability), "")
 
 
 def _can_use_generic_http(implementation: dict[str, Any], resources: dict[str, Any]) -> bool:
@@ -319,19 +416,184 @@ def _semantic_to_raw_arguments_from_contract(
     return {key: value for key, value in raw_arguments.items() if value not in (None, "")}
 
 
+def _missing_required_semantic_arguments(
+    semantic_arguments: dict[str, Any],
+    operation_contract: dict[str, Any],
+) -> list[str]:
+    request_contract = operation_contract.get("request", {}) if isinstance(operation_contract.get("request"), dict) else {}
+    missing: list[str] = []
+    for section in ("query", "body", "path", "header"):
+        fields = request_contract.get(section, {})
+        if not isinstance(fields, dict):
+            continue
+        for field_contract in fields.values():
+            if not isinstance(field_contract, dict) or not field_contract.get("required"):
+                continue
+            semantic_type = str(field_contract.get("semantic_type") or "")
+            if not semantic_type:
+                continue
+            value = semantic_arguments.get(semantic_type)
+            if value in (None, "", [], {}):
+                missing.append(semantic_type)
+    return sorted(set(missing))
+
+
 def _contract_argument_value(value: Any, transform: str, field_contract: dict[str, Any]) -> Any:
     enum_mapping = field_contract.get("enum_mapping")
     if isinstance(enum_mapping, dict):
         mapped = enum_mapping.get(str(value))
         if mapped not in (None, ""):
             return mapped
-    if not isinstance(value, dict):
-        return value
+    transformed = _apply_declared_transform(value, field_contract.get("transform"))
+    if not isinstance(transformed, dict):
+        return transformed
     if transform == "date_start":
-        return value.get("start") or value.get("from")
+        return transformed.get("start") or transformed.get("from")
     if transform == "date_end":
-        return value.get("end") or value.get("to")
+        return transformed.get("end") or transformed.get("to")
+    return transformed
+
+
+def _apply_declared_transform(value: Any, transform: Any) -> Any:
+    if not transform:
+        return value
+    if isinstance(transform, str):
+        return _apply_transform_step(value, {"name": transform})
+    if isinstance(transform, list):
+        current = value
+        for step in transform:
+            current = _apply_declared_transform(current, step)
+        return current
+    if isinstance(transform, dict):
+        current = value
+        if "strip" in transform:
+            current = _strip_chars(current, transform.get("strip"))
+        if transform.get("remove_whitespace"):
+            current = _remove_whitespace(current)
+        if transform.get("digits_only"):
+            current = _digits_only(current)
+        if "case" in transform:
+            current = _apply_case(current, str(transform.get("case") or ""))
+        if "phone_format" in transform:
+            current = _phone_format(current, str(transform.get("phone_format") or ""))
+        if "date_format" in transform:
+            current = _date_format(current, transform.get("date_format"))
+        name = transform.get("name") or transform.get("type")
+        return _apply_transform_step(current, {**transform, "name": name}) if name else current
     return value
+
+
+def _apply_transform_step(value: Any, transform: dict[str, Any]) -> Any:
+    name = str(transform.get("name") or "").strip()
+    if name in {"", "date_start", "date_end"}:
+        return value
+    if name in {"strip_chars", "strip"}:
+        return _strip_chars(value, transform.get("chars") or transform.get("strip"))
+    if name in {"remove_whitespace", "whitespace_remove"}:
+        return _remove_whitespace(value)
+    if name in {"digits_only", "number_digits"}:
+        return _digits_only(value)
+    if name == "uppercase":
+        return _apply_case(value, "upper")
+    if name == "lowercase":
+        return _apply_case(value, "lower")
+    if name == "phone_format":
+        return _phone_format(value, str(transform.get("style") or transform.get("format") or ""))
+    if name == "date_format":
+        return _date_format(value, transform)
+    return value
+
+
+def _strip_chars(value: Any, chars: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    remove = [str(item) for item in chars] if isinstance(chars, list) else list(str(chars or ""))
+    result = value
+    for char in remove:
+        result = result.replace(char, "")
+    return result
+
+
+def _remove_whitespace(value: Any) -> Any:
+    return re.sub(r"\s+", "", value) if isinstance(value, str) else value
+
+
+def _digits_only(value: Any) -> Any:
+    return re.sub(r"\D+", "", value) if isinstance(value, str) else value
+
+
+def _apply_case(value: Any, case: str) -> Any:
+    if not isinstance(value, str):
+        return value
+    if case in {"upper", "uppercase"}:
+        return value.upper()
+    if case in {"lower", "lowercase"}:
+        return value.lower()
+    return value
+
+
+def _phone_format(value: Any, style: str) -> Any:
+    if not isinstance(value, str):
+        return value
+    digits = _digits_only(value)
+    if style in {"kr_mobile_hyphen", "hyphenated_kr_mobile"} and len(digits) in {10, 11} and digits.startswith("01"):
+        middle = 3 if len(digits) == 10 else 4
+        return f"{digits[:3]}-{digits[3:3 + middle]}-{digits[3 + middle:]}"
+    if style in {"digits_only", "number_digits"}:
+        return digits
+    return value
+
+
+def _date_format(value: Any, rule: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    target = str(rule.get("to") or rule.get("target") or rule.get("format") or rule if isinstance(rule, dict) else rule)
+    if target in {"YYYYMMDD", "%Y%m%d"}:
+        digits = _digits_only(value)
+        if len(digits) >= 8:
+            return digits[:8]
+    return value
+
+
+def _validate_raw_arguments(raw_arguments: dict[str, Any], operation_contract: dict[str, Any]) -> list[dict[str, Any]]:
+    request_contract = operation_contract.get("request", {}) if isinstance(operation_contract.get("request"), dict) else {}
+    errors = []
+    for location in ("query", "body", "path", "header"):
+        fields = request_contract.get(location, {})
+        if not isinstance(fields, dict):
+            continue
+        for field_name, field_contract in fields.items():
+            if not isinstance(field_contract, dict) or field_contract.get("kind") == "auth":
+                continue
+            field = str(field_name)
+            value = raw_arguments.get(field)
+            if value in (None, ""):
+                continue
+            semantic_type = field_contract.get("semantic_type")
+            enum_values = field_contract.get("enum")
+            if isinstance(enum_values, list) and str(value) not in {str(item) for item in enum_values}:
+                errors.append(_validation_error(field, semantic_type, value, "enum", enum_values))
+            pattern = field_contract.get("pattern")
+            if pattern and not re.fullmatch(str(pattern), str(value)):
+                errors.append(_validation_error(field, semantic_type, value, "pattern", pattern))
+            min_length = field_contract.get("min_length")
+            if min_length is not None and len(str(value)) < int(min_length):
+                errors.append(_validation_error(field, semantic_type, value, "min_length", min_length))
+            max_length = field_contract.get("max_length")
+            if max_length is not None and len(str(value)) > int(max_length):
+                errors.append(_validation_error(field, semantic_type, value, "max_length", max_length))
+    return errors
+
+
+def _validation_error(field: str, semantic_type: Any, value: Any, rule: str, expected: Any) -> dict[str, Any]:
+    return {
+        "field": field,
+        "semantic_type": semantic_type,
+        "value": value,
+        "rule": rule,
+        "expected": expected,
+        "message": f"Value for {field} failed declared {rule} validation.",
+    }
 
 
 def _raw_argument_value(field_name: str, value: Any) -> Any:
@@ -349,8 +611,11 @@ def _normalize_response(
     response_mappings: list[dict[str, Any]],
     operation_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not isinstance(raw_result, dict) or not response_mappings:
+    if not isinstance(raw_result, dict):
         return {"items": []}
+    response_mappings = response_mappings or _response_mappings_from_contract(operation_contract or {})
+    if not response_mappings:
+        return {"items": [{"semantic": {}, "raw": item} for item in _result_items(raw_result)]}
     semantic_items = []
     for item in _result_items(raw_result):
         raw_item = item.get("raw") if isinstance(item, dict) and isinstance(item.get("raw"), dict) else item
@@ -360,20 +625,39 @@ def _normalize_response(
         for mapping in response_mappings:
             field_name = mapping.get("field_name")
             semantic_type = mapping.get("semantic_type")
-            if field_name in raw_item and semantic_type:
+            candidate = _mapped_response_value(raw_item, str(field_name or ""))
+            if candidate is not None and semantic_type:
                 current = semantic_item.get(str(semantic_type))
-                candidate = raw_item.get(field_name)
                 if current in (None, "") or candidate not in (None, ""):
                     semantic_item[str(semantic_type)] = candidate
-        company_items = _company_semantic_items(raw_item, semantic_item, operation_contract or {})
-        if company_items:
-            semantic_items.extend(company_items)
-        elif semantic_item:
+        if semantic_item:
             semantic_items.append({"semantic": semantic_item, "raw": raw_item})
     return {
         "items": semantic_items,
         "mapping_count": len(response_mappings),
     }
+
+
+def _response_mappings_from_contract(operation_contract: dict[str, Any]) -> list[dict[str, Any]]:
+    response_contract = operation_contract.get("response", {}) if isinstance(operation_contract.get("response"), dict) else {}
+    fields = response_contract.get("fields", {})
+    if not isinstance(fields, dict):
+        return []
+    mappings = []
+    for field_name, field_contract in fields.items():
+        if not isinstance(field_contract, dict):
+            continue
+        semantic_type = field_contract.get("semantic_type")
+        if semantic_type:
+            mappings.append(
+                {
+                    "field_name": str(field_name),
+                    "semantic_type": str(semantic_type),
+                    "direction": "response",
+                    "source": "operation_contract.response.fields",
+                }
+            )
+    return mappings
 
 
 def _apply_post_filters(semantic_result: dict[str, Any], post_filters: Any) -> dict[str, Any]:
@@ -392,7 +676,7 @@ def _apply_post_filters(semantic_result: dict[str, Any], post_filters: Any) -> d
 
 def _matches_post_filter(semantic: dict[str, Any], filter_item: dict[str, Any]) -> bool:
     semantic_type = str(filter_item.get("semantic_type") or "")
-    operator = str(filter_item.get("operator") or "=")
+    operator = str(filter_item.get("operator") or filter_item.get("op") or "=")
     expected = filter_item.get("value")
     actual = semantic.get(semantic_type)
     if actual in (None, ""):
@@ -414,41 +698,62 @@ def _matches_post_filter(semantic: dict[str, Any], filter_item: dict[str, Any]) 
     return True
 
 
+def _mapped_response_value(raw_item: dict[str, Any], field_name: str) -> Any:
+    if not field_name:
+        return None
+    if field_name in raw_item:
+        return raw_item.get(field_name)
+    for path in _response_path_candidates(field_name):
+        values = _path_values(raw_item, path)
+        for value in values:
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _response_path_candidates(field_name: str) -> list[str]:
+    normalized = field_name.replace("[*]", "[]")
+    without_arrays = normalized.replace("[]", "")
+    candidates = [normalized, without_arrays]
+    if "." in without_arrays:
+        candidates.append(without_arrays.rsplit(".", 1)[-1])
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
+def _path_values(value: Any, path: str) -> list[Any]:
+    current = [value]
+    for raw_part in path.split("."):
+        part = raw_part.strip()
+        if not part:
+            continue
+        array_part = part == "[]" or part.endswith("[]")
+        key = "" if part == "[]" else part.removesuffix("[]")
+        next_values: list[Any] = []
+        for item in current:
+            if key:
+                if not isinstance(item, dict) or key not in item:
+                    continue
+                selected = item.get(key)
+            else:
+                selected = item
+            if array_part:
+                if isinstance(selected, list):
+                    next_values.extend(selected)
+                elif selected not in (None, ""):
+                    next_values.append(selected)
+            else:
+                next_values.append(selected)
+        current = next_values
+        if not current:
+            return []
+    return current
+
+
 def _number(value: Any) -> float | None:
     try:
         return float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
-
-
-def _company_semantic_items(
-    raw_item: dict[str, Any],
-    base_semantic: dict[str, Any],
-    operation_contract: dict[str, Any],
-) -> list[dict[str, Any]]:
-    extractors = (
-        operation_contract.get("response", {}).get("extractors", {})
-        if isinstance(operation_contract.get("response"), dict)
-        else {}
-    )
-    corp_extractor = extractors.get("corpList") if isinstance(extractors, dict) else None
-    if not isinstance(corp_extractor, dict) or corp_extractor.get("parser") != "pps_contract_companies":
-        return []
-    produces = corp_extractor.get("produces", {})
-    if not isinstance(produces, dict):
-        return []
-    rows = []
-    for company in contract_companies(raw_item):
-        if not isinstance(company, dict):
-            continue
-        semantic = dict(base_semantic)
-        for raw_name, semantic_type in produces.items():
-            value = company.get(str(raw_name))
-            if value not in (None, ""):
-                semantic[str(semantic_type)] = value
-        if semantic:
-            rows.append({"semantic": semantic, "raw": raw_item, "extracted": {"corpList": company}})
-    return rows
 
 
 def _result_items(raw_result: dict[str, Any]) -> list[Any]:
@@ -496,7 +801,7 @@ def _execute_generic_http(raw_arguments: dict[str, Any], implementation: dict[st
     except ValueError:
         return _generic_error("invalid_response", "Provider API response was not JSON.", implementation, raw_arguments, url)
 
-    provider_error = _provider_payload_error(payload)
+    provider_error = _contract_payload_error(payload, operation_contract if isinstance(operation_contract, dict) else {})
     if provider_error:
         return {
             "error": provider_error,
@@ -508,15 +813,15 @@ def _execute_generic_http(raw_arguments: dict[str, Any], implementation: dict[st
                 "operation_id": implementation.get("operation_id"),
                 "method": method,
                 "url": url,
-                "request": params_or_body,
-                "query": query_arguments,
-                "body": body_arguments,
+                "request": _redact_secrets(params_or_body),
+                "query": _redact_secrets(query_arguments),
+                "body": _redact_secrets(body_arguments),
                 "called_at": datetime.now().astimezone().isoformat(),
             },
         }
 
     return {
-        "items": _generic_items(payload),
+        "items": _contract_items(payload, operation_contract if isinstance(operation_contract, dict) else {}),
         "raw": payload,
         "evidence": {
             "tool": "generic_http_executor",
@@ -525,9 +830,9 @@ def _execute_generic_http(raw_arguments: dict[str, Any], implementation: dict[st
             "operation_id": implementation.get("operation_id"),
             "method": method,
             "url": url,
-            "request": params_or_body,
-            "query": query_arguments,
-            "body": body_arguments,
+            "request": _redact_secrets(params_or_body),
+            "query": _redact_secrets(query_arguments),
+            "body": _redact_secrets(body_arguments),
             "called_at": datetime.now().astimezone().isoformat(),
         },
     }
@@ -545,22 +850,12 @@ def _with_provider_auth(
     operation_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     params = dict(raw_arguments)
-    key = _provider_api_key(provider)
+    auth = operation_contract.get("auth", {}) if isinstance(operation_contract, dict) else {}
+    key = _contract_api_key(auth)
     if not key:
         return params
-    auth = operation_contract.get("auth", {}) if isinstance(operation_contract, dict) else {}
     auth_parameter = str(auth.get("parameter") or "serviceKey")
-    if provider == "vworld":
-        params.setdefault(auth_parameter if auth_parameter != "serviceKey" else "key", key)
-        params.setdefault("format", "json")
-    elif provider in {"pps", "kma", "keco", "vworld", "kasi", "exim", "fss"}:
-        params.setdefault(auth_parameter, key)
-        params.setdefault("type", "json")
-    elif provider == "nts":
-        params.setdefault(auth_parameter, key)
-        params.setdefault("returnType", "JSON")
-    else:
-        params.setdefault(auth_parameter, key)
+    params.setdefault(auth_parameter, key)
     return params
 
 
@@ -579,7 +874,7 @@ def _split_request_arguments(
     query = {}
     body = {}
     for key, value in arguments.items():
-        if key in query_fields or (key == auth_parameter and auth_location == "query") or key in {"type", "returnType"}:
+        if key in query_fields or (key == auth_parameter and auth_location == "query"):
             query[key] = value
         elif key in body_fields:
             body[key] = value
@@ -588,22 +883,44 @@ def _split_request_arguments(
     return query, body
 
 
-def _provider_api_key(provider: str) -> str | None:
-    env_names = {
-        "pps": ("PPS_PUBLIC_API_KEY", "G2B_PUBLIC_API_KEY", "PUBLIC_API_KEY"),
-        "nts": ("NTS_BUSINESSMAN_API_KEY", "ODCLOUD_API_KEY", "PUBLIC_API_KEY"),
-        "kma": ("KMA_PUBLIC_API_KEY", "PUBLIC_API_KEY"),
-        "keco": ("KECO_PUBLIC_API_KEY", "AIRKOREA_PUBLIC_API_KEY", "PUBLIC_API_KEY"),
-        "vworld": ("VWORLD_API_KEY", "PUBLIC_API_KEY"),
-        "kasi": ("KASI_PUBLIC_API_KEY", "PUBLIC_API_KEY"),
-        "exim": ("EXIM_API_KEY", "PUBLIC_API_KEY"),
-        "fss": ("FSS_API_KEY", "PUBLIC_API_KEY"),
-    }.get(provider, ("PUBLIC_API_KEY",))
-    for env_name in env_names:
+def _contract_api_key(auth: dict[str, Any]) -> str | None:
+    env_names = auth.get("env_names") if isinstance(auth, dict) else None
+    names = [str(value) for value in env_names] if isinstance(env_names, list) else []
+    for env_name in names:
         value = os.getenv(env_name)
         if value:
             return value
     return None
+
+
+def _contract_items(payload: Any, operation_contract: dict[str, Any]) -> list[dict[str, Any]]:
+    response_contract = operation_contract.get("response", {}) if isinstance(operation_contract.get("response"), dict) else {}
+    item_paths = _contract_path_list(response_contract.get("items_path"))
+    for items_path in item_paths:
+        values = _path_values(payload, items_path)
+        if len(values) == 1 and isinstance(values[0], list):
+            values = values[0]
+        items = [item for item in values if isinstance(item, dict)]
+        if items:
+            return items
+    if item_paths:
+        return []
+    selectors = operation_contract.get("selectors", {}) if isinstance(operation_contract.get("selectors"), dict) else {}
+    result_root = str(selectors.get("result_root") or "")
+    if result_root:
+        values = _path_values(payload, result_root)
+        if len(values) == 1 and isinstance(values[0], list):
+            values = values[0]
+        return [item for item in values if isinstance(item, dict)]
+    return _generic_items(payload)
+
+
+def _contract_path_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item or "").strip()]
+    if str(value or "").strip():
+        return [str(value)]
+    return []
 
 
 def _generic_items(payload: Any) -> list[dict[str, Any]]:
@@ -625,32 +942,54 @@ def _generic_items(payload: Any) -> list[dict[str, Any]]:
     return [payload]
 
 
-def _provider_payload_error(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return None
-    response = payload.get("response")
-    if isinstance(response, dict):
-        status = str(response.get("status") or "").upper()
-        error = response.get("error")
-        if status == "ERROR" or isinstance(error, dict):
-            message = ""
-            if isinstance(error, dict):
-                message = str(error.get("text") or error.get("message") or "")
+def _contract_payload_error(payload: Any, operation_contract: dict[str, Any]) -> dict[str, Any] | None:
+    response_contract = operation_contract.get("response", {}) if isinstance(operation_contract.get("response"), dict) else {}
+    error_contract = response_contract.get("error") if isinstance(response_contract.get("error"), dict) else {}
+    success_contract = response_contract.get("success") if isinstance(response_contract.get("success"), dict) else {}
+    if error_contract:
+        code = _first_path_value(payload, str(error_contract.get("code_path") or ""))
+        message = _first_path_value(payload, str(error_contract.get("message_path") or ""))
+        error_equals = error_contract.get("equals")
+        error_not_equals = error_contract.get("not_equals")
+        is_error = False
+        if error_equals is not None:
+            is_error = str(code) == str(error_equals)
+        elif error_not_equals is not None:
+            is_error = str(code) != str(error_not_equals)
+        elif code not in (None, ""):
+            is_error = True
+        if is_error:
             return {
                 "type": "provider_error",
-                "message": message or "Provider API returned an error payload.",
-                "provider_status": response.get("status"),
-                "provider_error": error,
+                "message": str(message or "Provider API returned an error payload."),
+                "provider_status": code,
             }
-    header = payload.get("header")
-    if isinstance(header, dict) and str(header.get("resultCode") or "00") not in {"00", "0", "SUCCESS"}:
-        return {
-            "type": "provider_error",
-            "message": str(header.get("resultMsg") or "Provider API returned an error payload."),
-            "provider_status": header.get("resultCode"),
-            "provider_error": header,
-        }
+    if success_contract:
+        value = _first_path_value(payload, str(success_contract.get("path") or ""))
+        if "equals" in success_contract and str(value) != str(success_contract.get("equals")):
+            message = _first_path_value(payload, str(success_contract.get("message_path") or ""))
+            return {
+                "type": "provider_error",
+                "message": str(message or "Provider API did not match the declared success condition."),
+                "provider_status": value,
+            }
+        if "in" in success_contract and isinstance(success_contract.get("in"), list):
+            allowed = {str(item) for item in success_contract.get("in", [])}
+            if str(value) not in allowed:
+                message = _first_path_value(payload, str(success_contract.get("message_path") or ""))
+                return {
+                    "type": "provider_error",
+                    "message": str(message or "Provider API did not match the declared success condition."),
+                    "provider_status": value,
+                }
     return None
+
+
+def _first_path_value(payload: Any, path: str) -> Any:
+    if not path:
+        return None
+    values = _path_values(payload, path)
+    return values[0] if values else None
 
 
 def _generic_error(
@@ -671,7 +1010,7 @@ def _generic_error(
             "resource_id": implementation.get("resource_id"),
             "operation_id": implementation.get("operation_id"),
             "url": url,
-            "request": raw_arguments,
+            "request": _redact_secrets(raw_arguments),
         },
     }
 
@@ -685,6 +1024,7 @@ def _skipped(
         "node": node.get("id"),
         "capability": node.get("capability"),
         "status": "skipped",
+        "result_status": _result_status("skipped", reason=reason),
         "reason": reason,
     }
     if implementation:
@@ -692,9 +1032,41 @@ def _skipped(
     return row
 
 
+def _result_status(
+    status: str,
+    *,
+    raw_result: Any | None = None,
+    semantic_result: dict[str, Any] | None = None,
+    reason: str | None = None,
+) -> str:
+    if status == "executed":
+        items = semantic_result.get("items", []) if isinstance(semantic_result, dict) else []
+        return "executed_with_items" if items else "executed_empty"
+    if status == "error":
+        error = raw_result.get("error") if isinstance(raw_result, dict) else {}
+        error_type = str(error.get("type") or "") if isinstance(error, dict) else ""
+        if error_type == "provider_error":
+            return "provider_error"
+        if error_type in {"timeout", "transport_error", "invalid_response"}:
+            return error_type
+        return "execution_error"
+    if status == "skipped":
+        if reason in {
+            "missing_required_semantic_arguments",
+            "missing_semantic_arguments",
+            "semantic_arguments_not_mappable",
+            "tool_argument_error",
+            "argument_validation_failed",
+        }:
+            return "validation_error"
+        return "not_executable"
+    return status
+
+
 def _implementation_summary(implementation: dict[str, Any]) -> dict[str, Any]:
     return {
         "operation_id": implementation.get("operation_id"),
+        "variant_id": implementation.get("variant_id"),
         "resource_id": implementation.get("resource_id"),
         "provider": implementation.get("provider"),
         "tool": implementation.get("tool"),
@@ -759,56 +1131,77 @@ def _skip_summary(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _missing_required_raw_arguments(tool_name: str, raw_arguments: dict[str, Any]) -> list[str]:
-    required = TOOL_REQUIRED_RAW_ARGUMENTS.get(tool_name, set())
-    return sorted(item for item in required if raw_arguments.get(item) in (None, ""))
+def _smoke_result(
+    *,
+    operation_id: str,
+    variant_id: str | None = None,
+    capability_id: str | None = None,
+    status: str,
+    result_status: str | None = None,
+    semantic_arguments: dict[str, Any],
+    raw_arguments: dict[str, Any] | None = None,
+    response_sample: dict[str, Any] | None = None,
+    normalized_sample: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    subject = variant_id or operation_id
+    return {
+        "id": f"check.{subject}.{timestamp}",
+        "operation_id": operation_id,
+        "variant_id": variant_id,
+        "capability_id": capability_id,
+        "check_type": "smoke_test",
+        "status": status,
+        "result_status": result_status or status,
+        "request_payload": {
+            "semantic_arguments": semantic_arguments,
+            "raw_arguments": _redact_secrets(raw_arguments or {}),
+        },
+        "response_sample": _compact_sample(_redact_secrets(response_sample or {})),
+        "normalized_sample": _compact_sample(normalized_sample or {}),
+        "error_message": error_message,
+        "executor": "pubdata_mcp",
+        "duration_ms": duration_ms,
+    }
 
 
-def _check_nts_business_status(raw_arguments: dict[str, Any], _implementation: dict[str, Any]) -> dict[str, Any]:
-    business_number = raw_arguments.get("b_no")
-    if isinstance(business_number, list):
-        business_numbers = [str(value) for value in business_number if value not in (None, "")]
-    else:
-        business_numbers = [str(business_number)]
-    return check_business_status(business_numbers)
+def _compact_sample(value: dict[str, Any], max_chars: int = 20000) -> dict[str, Any]:
+    import json
+
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+    except TypeError:
+        return {"value": str(value)[:max_chars]}
+    if len(encoded) <= max_chars:
+        return value
+    return {"truncated": True, "preview": encoded[:max_chars]}
 
 
-def _validate_nts_business_registration(raw_arguments: dict[str, Any], _implementation: dict[str, Any]) -> dict[str, Any]:
-    required = {"b_no", "p_nm", "start_dt"}
-    missing = sorted(required - set(raw_arguments))
-    if missing:
-        return {
-            "error": {
-                "type": "missing_arguments",
-                "message": "Validation requires b_no, p_nm, and start_dt.",
-                "missing": missing,
-            }
-        }
-    return validate_business_registration([raw_arguments])
+def _persist_smoke_result(result: dict[str, Any]) -> dict[str, Any]:
+    from apps.pubdata_mcp.app.common.catalog import record_endpoint_check
+
+    stored = record_endpoint_check(result)
+    return {**result, "stored": bool(stored), "stored_record": stored}
 
 
-def _search_pps_contracts(raw_arguments: dict[str, Any], _implementation: dict[str, Any]) -> dict[str, Any]:
-    return search_contracts(
-        category=str(raw_arguments.get("bsnsDivNm") or "물품"),
-        contract_date_from=str(raw_arguments.get("inqryBgnDt") or raw_arguments.get("cntrctDate") or ""),
-        contract_date_to=str(raw_arguments.get("inqryEndDt") or raw_arguments.get("cntrctDate") or ""),
-        keyword=raw_arguments.get("cntrctNm"),
-        page_no=int(raw_arguments.get("pageNo") or 1),
-        num_of_rows=int(raw_arguments.get("numOfRows") or 10),
-    )
+def _redact_secrets(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _is_sensitive_key(key_text):
+                redacted[key] = "***REDACTED***"
+            else:
+                redacted[key] = _redact_secrets(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    return value
 
 
-TOOL_REGISTRY: dict[str, ToolAdapter] = {
-    "check_nts_business_status_live": _check_nts_business_status,
-    "validate_nts_business_registration_live": _validate_nts_business_registration,
-    "search_pps_contracts_live": _search_pps_contracts,
-}
-
-TOOL_REQUIRED_RAW_ARGUMENTS: dict[str, set[str]] = {
-    "check_nts_business_status_live": {"b_no"},
-    "validate_nts_business_registration_live": {"b_no", "p_nm", "start_dt"},
-}
-
-FALLBACK_TOOL_BY_PROVIDER_CAPABILITY: dict[tuple[str, str], str] = {
-    ("pps", "search_procurement_contracts"): "search_pps_contracts_live",
-}
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.replace("-", "_").lower()
+    compact = normalized.replace("_", "")
+    return any(part in normalized or part in compact for part in SENSITIVE_KEY_PARTS)

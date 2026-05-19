@@ -2,6 +2,26 @@
 # Source of truth: services/*/manifests + apps/**/manifests
 name: infra
 services:
+  embedding-service:
+    build:
+      context: ../..
+      dockerfile: services/embedding/infra/image/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../services/embedding/infra/env/app.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${EMBEDDING_SERVICE_HOST_PORT:-8020}:8000"
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    volumes:
+      - ${EMBEDDING_MODELS_DIR:-../../data/models/embeddings}:/data/models/embeddings:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()"]
+      interval: 10s
+      timeout: 6s
+      retries: 20
+
   nginx:
     build:
       context: ../..
@@ -59,13 +79,13 @@ services:
       retries: 5
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     command: ["postgres", "-c", "timezone=Asia/Seoul"]
     restart: unless-stopped
     env_file:
       - ./env/postgres.env
     ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
+      - "${POSTGRES_HOST_BIND_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:${POSTGRES_CONTAINER_PORT:-5432}"
     volumes:
       - ${POSTGRES_DATA_DIR:-../../data/postgres}:/var/lib/postgresql/data
       - ../../services/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -174,6 +194,9 @@ services:
     profiles:
       - "semantic_platform"
       - "pubdata"
+    depends_on:
+      embedding-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
       interval: 10s
@@ -214,6 +237,8 @@ services:
     volumes:
       - ../../sources:/app/sources
     depends_on:
+      embedding-service:
+        condition: service_healthy
       prefect-server:
         condition: service_healthy
 
