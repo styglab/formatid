@@ -10,6 +10,8 @@ Endpoints:
 
 - `GET /health/ready`
 - `GET /semantic/catalog`
+- `GET /catalog`
+- `GET /catalog/sections/{section}?limit=100&offset=0&q=`
 - `GET /semantic/execution/contracts`
 - `GET /semantic/meta`
 - `GET /semantic/capability-documents`
@@ -23,3 +25,24 @@ Endpoints:
 - `POST /planner/plan`
 - `POST /planner/execution-plan`
 - `POST /runtime/context`
+
+`/catalog` is kept for compatibility. Dashboard and larger clients should prefer
+`/catalog/sections/{section}` so catalog tables can be paged at the API layer.
+Supported sections include:
+
+- `semantic_types`
+- `entities`
+- `entity_identifiers`
+- `capabilities`
+- `capability_documents`
+- `capability_entity_links`
+- `capability_dependencies`
+- `resources`
+- `operations`
+- `operation_fields`
+- `operation_contracts`
+- `operation_variants`
+- `field_mappings`
+- `capability_implementations`
+- `semantic_join_rules`
+- `planning_examples`

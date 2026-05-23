@@ -101,8 +101,6 @@ services:
     env_file:
       - ./env/prefect.env
     profiles:
-      - "g2b-pipeline"
-      - "g2b"
       - "semantic_platform"
       - "pubdata"
     volumes:
@@ -117,8 +115,6 @@ services:
     image: redis:7
     restart: unless-stopped
     profiles:
-      - "g2b-pipeline"
-      - "g2b"
       - "semantic_platform"
       - "pubdata"
     volumes:
@@ -138,8 +134,6 @@ services:
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${PREFECT_HOST_PORT:-4200}:4200"
     profiles:
-      - "g2b-pipeline"
-      - "g2b"
       - "semantic_platform"
       - "pubdata"
     depends_on:
@@ -160,8 +154,6 @@ services:
     env_file:
       - ./env/prefect.env
     profiles:
-      - "g2b-pipeline"
-      - "g2b"
       - "semantic_platform"
       - "pubdata"
     depends_on:
@@ -239,41 +231,6 @@ services:
     depends_on:
       embedding-service:
         condition: service_healthy
-      prefect-server:
-        condition: service_healthy
-
-  g2b-mcp:
-    build:
-      context: ../..
-      dockerfile: apps/g2b/mcp/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ../../apps/g2b/mcp/infra/env/app.env
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${G2B_MCP_HOST_PORT:-8013}:8000"
-    profiles:
-      - "g2b-mcp"
-      - "g2b"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  g2b-pipeline-worker:
-    build:
-      context: ../..
-      dockerfile: apps/g2b/pipeline/infra/image/Dockerfile
-    command: ["sh", "-c", "prefect work-pool inspect $$PREFECT_WORK_POOL >/dev/null 2>&1 || prefect work-pool create $$PREFECT_WORK_POOL --type process; python -m apps.g2b.pipeline.app.deployments; prefect worker start --pool $$PREFECT_WORK_POOL"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ../../apps/g2b/pipeline/infra/env/app.env
-    profiles:
-      - "g2b-pipeline"
-      - "g2b"
-    depends_on:
       prefect-server:
         condition: service_healthy
 

@@ -47,10 +47,16 @@ class SourceGraphState(TypedDict, total=False):
     operations: list[dict[str, Any]]
     operation_fields: list[dict[str, Any]]
     semantic_types: list[dict[str, Any]]
+    entities: list[dict[str, Any]]
+    entity_identifiers: list[dict[str, Any]]
     capabilities: list[dict[str, Any]]
+    capability_entity_links: list[dict[str, Any]]
+    capability_dependencies: list[dict[str, Any]]
     operation_contracts: list[dict[str, Any]]
     operation_variants: list[dict[str, Any]]
     field_mappings: list[dict[str, Any]]
+    semantic_join_rules: list[dict[str, Any]]
+    planning_examples: list[dict[str, Any]]
     capability_implementations: list[dict[str, Any]]
     verification_results: list[dict[str, Any]]
     proposal: dict[str, Any]
@@ -242,7 +248,13 @@ def load_catalog_context(state: SourceGraphState) -> SourceGraphState:
         **state,
         "catalog_context": {
             "semantic_types": _catalog_values(catalog.get("semantic_types", {}), limit=120),
+            "entities": _catalog_values(catalog.get("entities", {}), limit=120),
+            "entity_identifiers": _catalog_values(catalog.get("entity_identifiers", {}), limit=120),
+            "semantic_join_rules": _catalog_values(catalog.get("semantic_join_rules", {}), limit=120),
             "capabilities": _catalog_values(catalog.get("capabilities", {}), limit=120),
+            "capability_entity_links": _catalog_values(catalog.get("capability_entity_links", {}), limit=120),
+            "capability_dependencies": _catalog_values(catalog.get("capability_dependencies", {}), limit=120),
+            "planning_examples": _catalog_values(catalog.get("planning_examples", {}), limit=120),
             "operation_contracts_summary": _contract_summary(catalog.get("operation_contracts", {})),
             "operation_variants_summary": _variant_summary(catalog.get("operation_variants", {})),
             "recent_proposals": [
@@ -299,7 +311,13 @@ def llm_propose_capability_catalog(state: SourceGraphState) -> SourceGraphState:
         "analysis": analysis,
         "capability_analysis": {
             "semantic_types": _list(analysis.get("semantic_types")),
+            "entities": _list(analysis.get("entities")),
+            "entity_identifiers": _list(analysis.get("entity_identifiers")),
             "capabilities": _list(analysis.get("capabilities")),
+            "capability_entity_links": _list(analysis.get("capability_entity_links")),
+            "capability_dependencies": _list(analysis.get("capability_dependencies")),
+            "semantic_join_rules": _list(analysis.get("semantic_join_rules")),
+            "planning_examples": _list(analysis.get("planning_examples")),
         },
     }
 
@@ -335,7 +353,13 @@ def llm_propose_execution_catalog(state: SourceGraphState) -> SourceGraphState:
                 "operations": _list(analysis.get("operations")),
                 "operation_fields": operation_fields,
                 "semantic_types": _list(analysis.get("semantic_types")),
+                "entities": _list(analysis.get("entities")),
+                "entity_identifiers": _list(analysis.get("entity_identifiers")),
                 "capabilities": _list(analysis.get("capabilities")),
+                "capability_entity_links": _list(analysis.get("capability_entity_links")),
+                "capability_dependencies": _list(analysis.get("capability_dependencies")),
+                "semantic_join_rules": _list(analysis.get("semantic_join_rules")),
+                "planning_examples": _list(analysis.get("planning_examples")),
                 "operation_contracts": operation_contracts,
                 "operation_variants": _list(analysis.get("operation_variants")),
                 "field_mappings": field_mappings,
@@ -404,10 +428,13 @@ def keep_passed_verified_capabilities(state: SourceGraphState) -> SourceGraphSta
         return {
             **state,
             "capabilities": [],
+            "capability_entity_links": [],
+            "capability_dependencies": [],
             "operation_fields": [],
             "operation_contracts": [],
             "operation_variants": [],
             "field_mappings": [],
+            "planning_examples": [],
             "capability_implementations": [],
         }
 
@@ -426,6 +453,16 @@ def keep_passed_verified_capabilities(state: SourceGraphState) -> SourceGraphSta
             for capability in state.get("capabilities", [])
             if str(capability.get("id") or "") in kept_capability_ids
         ],
+        "capability_entity_links": [
+            link
+            for link in state.get("capability_entity_links", [])
+            if str(link.get("capability_id") or "") in kept_capability_ids
+        ],
+        "capability_dependencies": [
+            dependency
+            for dependency in state.get("capability_dependencies", [])
+            if str(dependency.get("capability_id") or "") in kept_capability_ids
+        ],
         "operation_fields": [
             field
             for field in state.get("operation_fields", [])
@@ -441,6 +478,11 @@ def keep_passed_verified_capabilities(state: SourceGraphState) -> SourceGraphSta
             mapping
             for mapping in state.get("field_mappings", [])
             if str(mapping.get("operation_id") or "") in kept_operation_ids
+        ],
+        "planning_examples": [
+            example
+            for example in state.get("planning_examples", [])
+            if set(str(value) for value in _list_values(example.get("expected_capability_ids"))) & kept_capability_ids
         ],
         "capability_implementations": [
             implementation
@@ -557,10 +599,16 @@ def _validate_llm_analysis(analysis: dict[str, Any]) -> None:
         "resources",
         "operations",
         "semantic_types",
+        "entities",
+        "entity_identifiers",
         "capabilities",
+        "capability_entity_links",
+        "capability_dependencies",
         "operation_contracts",
         "operation_variants",
         "field_mappings",
+        "semantic_join_rules",
+        "planning_examples",
         "capability_implementations",
     )
     for key in required_lists:
@@ -569,11 +617,54 @@ def _validate_llm_analysis(analysis: dict[str, Any]) -> None:
     resources = {str(item.get("id") or "") for item in _list(analysis.get("resources"))}
     operations = {str(item.get("operation_id") or "") for item in _list(analysis.get("operations"))}
     semantic_types = {str(item.get("id") or "") for item in _list(analysis.get("semantic_types"))}
+    entities = {str(item.get("id") or "") for item in _list(analysis.get("entities"))}
     capabilities = {str(item.get("id") or "") for item in _list(analysis.get("capabilities"))}
     resources.discard("")
     operations.discard("")
     semantic_types.discard("")
+    entities.discard("")
     capabilities.discard("")
+    for item in _list(analysis.get("entity_identifiers")):
+        entity_id = _require(item, "entity_id", "entity_identifier")
+        semantic_type_id = _require(item, "semantic_type_id", "entity_identifier")
+        if entity_id not in entities:
+            raise ValueError(f"entity identifier references unknown entity: {entity_id}")
+        if semantic_type_id not in semantic_types:
+            raise ValueError(f"entity identifier references unknown semantic type: {semantic_type_id}")
+    for item in _list(analysis.get("capability_entity_links")):
+        capability_id = _require(item, "capability_id", "capability_entity_link")
+        entity_id = _require(item, "entity_id", "capability_entity_link")
+        if capability_id not in capabilities:
+            raise ValueError(f"capability entity link references unknown capability: {capability_id}")
+        if entity_id not in entities:
+            raise ValueError(f"capability entity link references unknown entity: {entity_id}")
+        semantic_type_id = str(item.get("semantic_type_id") or "")
+        if semantic_type_id and semantic_type_id not in semantic_types:
+            raise ValueError(f"capability entity link references unknown semantic type: {semantic_type_id}")
+    for item in _list(analysis.get("capability_dependencies")):
+        capability_id = _require(item, "capability_id", "capability_dependency")
+        depends_on = _require(item, "depends_on_capability_id", "capability_dependency")
+        if capability_id not in capabilities:
+            raise ValueError(f"capability dependency references unknown capability: {capability_id}")
+        if depends_on not in capabilities:
+            raise ValueError(f"capability dependency references unknown dependency: {depends_on}")
+    for item in _list(analysis.get("semantic_join_rules")):
+        from_type = _require(item, "from_semantic_type_id", "semantic_join_rule")
+        to_type = _require(item, "to_semantic_type_id", "semantic_join_rule")
+        if from_type not in semantic_types:
+            raise ValueError(f"join rule references unknown semantic type: {from_type}")
+        if to_type not in semantic_types:
+            raise ValueError(f"join rule references unknown semantic type: {to_type}")
+        for key in ("from_entity_id", "to_entity_id"):
+            entity_id = str(item.get(key) or "")
+            if entity_id and entity_id not in entities:
+                raise ValueError(f"join rule references unknown entity: {entity_id}")
+    for item in _list(analysis.get("planning_examples")):
+        _require(item, "id", "planning_example")
+        _require(item, "question", "planning_example")
+        for capability_id in _list_values(item.get("expected_capability_ids")):
+            if str(capability_id) not in capabilities:
+                raise ValueError(f"planning example references unknown capability: {capability_id}")
     for item in _list(analysis.get("operations")):
         _require(item, "operation_id", "operation")
         resource_id = str(item.get("resource_id") or "")
@@ -692,6 +783,12 @@ def _capability_review_proposal(
     field_mappings = closure["field_mappings"]
     resources = closure["resources"]
     semantic_types = closure["semantic_types"]
+    entities = closure["entities"]
+    entity_identifiers = closure["entity_identifiers"]
+    capability_entity_links = closure["capability_entity_links"]
+    capability_dependencies = closure["capability_dependencies"]
+    semantic_join_rules = closure["semantic_join_rules"]
+    planning_examples = closure["planning_examples"]
 
     proposal_id = f"proposal.{source_document['id']}.{capability_id}.review"
     trace = _capability_trace(state, capability_id, operation_contracts, variants)
@@ -702,6 +799,10 @@ def _capability_review_proposal(
         "operation_field_count": len(operation_fields),
         "resource_count": len(resources),
         "semantic_type_count": len(semantic_types),
+        "entity_count": len(entities),
+        "entity_identifier_count": len(entity_identifiers),
+        "semantic_join_rule_count": len(semantic_join_rules),
+        "planning_example_count": len(planning_examples),
         "operation_contract_count": len(operation_contracts),
         "operation_variant_count": len(variants),
         "field_mapping_count": len(field_mappings),
@@ -713,6 +814,12 @@ def _capability_review_proposal(
         "operations": operations,
         "operation_fields": operation_fields,
         "semantic_types": semantic_types,
+        "entities": entities,
+        "entity_identifiers": entity_identifiers,
+        "capability_entity_links": capability_entity_links,
+        "capability_dependencies": capability_dependencies,
+        "semantic_join_rules": semantic_join_rules,
+        "planning_examples": planning_examples,
         "operation_contracts": operation_contracts,
         "operation_variants": variants,
         "field_mappings": field_mappings,
@@ -729,12 +836,18 @@ def _capability_review_proposal(
     grouped_items: list[tuple[str, list[dict[str, Any]]]] = [
         ("resource", resources),
         ("semantic_type", semantic_types),
+        ("entity", entities),
+        ("entity_identifier", entity_identifiers),
         ("capability", [capability_payload]),
+        ("capability_entity_link", capability_entity_links),
+        ("capability_dependency", capability_dependencies),
         ("operation", operations),
         ("operation_field", operation_fields),
         ("operation_contract", operation_contracts),
         ("operation_variant", variants),
         ("field_mapping", field_mappings),
+        ("semantic_join_rule", semantic_join_rules),
+        ("planning_example", planning_examples),
         ("capability_implementation", implementations),
     ]
     for item_type, payloads in grouped_items:
@@ -802,6 +915,39 @@ def _capability_catalog_closure(
         and str(item.get("semantic_type_id") or "") in semantic_type_ids
     ]
     semantic_type_ids.update(str(item.get("semantic_type_id") or "") for item in field_mappings if item.get("semantic_type_id"))
+    capability_entity_links = [
+        item for item in state.get("capability_entity_links", [])
+        if str(item.get("capability_id") or "") == capability_id
+    ]
+    capability_dependencies = [
+        item for item in state.get("capability_dependencies", [])
+        if str(item.get("capability_id") or "") == capability_id
+    ]
+    semantic_type_ids.update(str(item.get("semantic_type_id") or "") for item in capability_entity_links if item.get("semantic_type_id"))
+    semantic_type_ids.update(str(item.get("semantic_type_id") or "") for item in capability_dependencies if item.get("semantic_type_id"))
+    entity_ids = {
+        str(item.get("entity_id") or "")
+        for item in capability_entity_links
+        if item.get("entity_id")
+    }
+    entity_identifiers = [
+        item for item in state.get("entity_identifiers", [])
+        if str(item.get("entity_id") or "") in entity_ids
+        or str(item.get("semantic_type_id") or "") in semantic_type_ids
+    ]
+    entity_ids.update(str(item.get("entity_id") or "") for item in entity_identifiers if item.get("entity_id"))
+    semantic_type_ids.update(str(item.get("semantic_type_id") or "") for item in entity_identifiers if item.get("semantic_type_id"))
+    semantic_join_rules = [
+        item for item in state.get("semantic_join_rules", [])
+        if str(item.get("from_semantic_type_id") or "") in semantic_type_ids
+        or str(item.get("to_semantic_type_id") or "") in semantic_type_ids
+        or str(item.get("from_entity_id") or "") in entity_ids
+        or str(item.get("to_entity_id") or "") in entity_ids
+    ]
+    planning_examples = [
+        item for item in state.get("planning_examples", [])
+        if capability_id in {str(value) for value in _list_values(item.get("expected_capability_ids"))}
+    ]
     operation_field_ids = {
         str(item.get("operation_field_id") or "")
         for item in field_mappings
@@ -835,15 +981,22 @@ def _capability_catalog_closure(
         if item.get("resource_id")
     }
     resources = [item for item in state.get("resources", []) if str(item.get("id") or "") in resource_ids]
+    entities = [item for item in state.get("entities", []) if str(item.get("id") or "") in entity_ids]
     semantic_types = [item for item in state.get("semantic_types", []) if str(item.get("id") or "") in semantic_type_ids]
     return {
         "resources": resources,
         "operations": operations,
         "operation_fields": operation_fields,
         "semantic_types": semantic_types,
+        "entities": entities,
+        "entity_identifiers": entity_identifiers,
         "operation_contracts": operation_contracts,
         "operation_variants": variants,
         "field_mappings": field_mappings,
+        "semantic_join_rules": semantic_join_rules,
+        "capability_entity_links": capability_entity_links,
+        "capability_dependencies": capability_dependencies,
+        "planning_examples": planning_examples,
         "capability_implementations": implementations,
     }
 
@@ -1072,6 +1225,41 @@ def _filter_analysis_by_passed_endpoints(
     capabilities = [
         capability for capability in analysis["capabilities"] if str(capability.get("id") or "") in capability_ids
     ]
+    capability_entity_links = [
+        link for link in analysis.get("capability_entity_links", []) if str(link.get("capability_id") or "") in capability_ids
+    ]
+    capability_dependencies = [
+        dependency for dependency in analysis.get("capability_dependencies", []) if str(dependency.get("capability_id") or "") in capability_ids
+    ]
+    entity_ids = {str(link.get("entity_id") or "") for link in capability_entity_links if link.get("entity_id")}
+    semantic_type_ids = {
+        str(value)
+        for capability in capabilities
+        for value in [*_list_values(capability.get("inputs")), *_list_values(capability.get("outputs"))]
+    }
+    semantic_type_ids.update(str(link.get("semantic_type_id") or "") for link in capability_entity_links if link.get("semantic_type_id"))
+    semantic_type_ids.update(str(dependency.get("semantic_type_id") or "") for dependency in capability_dependencies if dependency.get("semantic_type_id"))
+    entity_identifiers = [
+        identifier
+        for identifier in analysis.get("entity_identifiers", [])
+        if str(identifier.get("entity_id") or "") in entity_ids
+        or str(identifier.get("semantic_type_id") or "") in semantic_type_ids
+    ]
+    entity_ids.update(str(identifier.get("entity_id") or "") for identifier in entity_identifiers if identifier.get("entity_id"))
+    entities = [entity for entity in analysis.get("entities", []) if str(entity.get("id") or "") in entity_ids]
+    semantic_join_rules = [
+        rule
+        for rule in analysis.get("semantic_join_rules", [])
+        if str(rule.get("from_entity_id") or "") in entity_ids
+        or str(rule.get("to_entity_id") or "") in entity_ids
+        or str(rule.get("from_semantic_type_id") or "") in semantic_type_ids
+        or str(rule.get("to_semantic_type_id") or "") in semantic_type_ids
+    ]
+    planning_examples = [
+        example
+        for example in analysis.get("planning_examples", [])
+        if set(str(value) for value in _list_values(example.get("expected_capability_ids"))) & capability_ids
+    ]
     field_mappings = [
         mapping for mapping in analysis["field_mappings"] if str(mapping.get("operation_id") or "") in operation_ids
     ]
@@ -1085,10 +1273,16 @@ def _filter_analysis_by_passed_endpoints(
         **analysis,
         "operations": operations,
         "operation_fields": operation_fields,
+        "entities": entities,
+        "entity_identifiers": entity_identifiers,
         "capabilities": capabilities,
+        "capability_entity_links": capability_entity_links,
+        "capability_dependencies": capability_dependencies,
         "operation_contracts": operation_contracts,
         "operation_variants": operation_variants,
         "field_mappings": field_mappings,
+        "semantic_join_rules": semantic_join_rules,
+        "planning_examples": planning_examples,
         "capability_implementations": capability_implementations,
     }
 
@@ -1286,10 +1480,23 @@ def _call_capability_llm(state: SourceGraphState) -> dict[str, Any] | None:
                     "You create semantic catalog proposals from public API specification evidence. "
                     "Use only verified_api_sections whose endpoint probe status passed. "
                     "Do not create capabilities for failed or inconclusive endpoints. "
-                    "Return JSON only with keys: resources, operations, semantic_types, capabilities, "
+                    "Return JSON only with keys: resources, operations, semantic_types, entities, "
+                    "entity_identifiers, capabilities, capability_entity_links, capability_dependencies, "
                     "operation_fields, operation_contracts, operation_variants, field_mappings, "
-                    "capability_implementations. "
+                    "semantic_join_rules, planning_examples, capability_implementations. "
                     "Keep capability ids provider-neutral and describe what a planner can do. "
+                    "Model canonical business concepts as entities, entity identifiers, semantic join rules, "
+                    "and capability dependencies instead of hiding joins in endpoint descriptions. "
+                    "Do not leave entities, entity_identifiers, capability_entity_links, or planning_examples empty "
+                    "when the source has identifiable business objects, identifiers, or planner examples. "
+                    "Create reusable entities such as Business, Contract, Organization, FinancialStatement, "
+                    "ExchangeRate, and Currency when supported by the source evidence. "
+                    "Each capability should link to at least one relevant entity with role input, output, or subject. "
+                    "Each identifier semantic type should be attached to the entity it identifies. "
+                    "Create semantic_join_rules only for reusable identifier equivalence or join paths "
+                    "that can support multi-step planning across capabilities. "
+                    "Create planning_examples that map realistic user questions to expected capability, "
+                    "operation, variant, and semantic argument ids. "
                     "Treat provider control fields as operation-scoped semantics, never global rules. "
                     "If one physical endpoint changes meaning by a control field value, create separate "
                     "operation_variants and separate planner-facing capabilities for those meanings. "

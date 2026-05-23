@@ -85,6 +85,66 @@ class IngestionContractSchemaTests(unittest.TestCase):
 
         _validate_llm_analysis(analysis)
 
+    def test_semantic_graph_layers_accept_declared_references(self) -> None:
+        analysis = {
+            "resources": [{"id": "resource.phone"}],
+            "operations": [{"operation_id": "op.phone", "resource_id": "resource.phone"}],
+            "semantic_types": [{"id": "phone_number"}, {"id": "customer_id"}],
+            "entities": [{"id": "Customer"}],
+            "entity_identifiers": [
+                {"id": "identifier.customer.phone", "entity_id": "Customer", "semantic_type_id": "phone_number"}
+            ],
+            "capabilities": [{"id": "lookup_customer", "inputs": ["phone_number"], "outputs": ["customer_id"]}],
+            "capability_entity_links": [
+                {
+                    "id": "link.lookup_customer.customer.input",
+                    "capability_id": "lookup_customer",
+                    "entity_id": "Customer",
+                    "role": "input",
+                    "semantic_type_id": "phone_number",
+                }
+            ],
+            "capability_dependencies": [],
+            "operation_contracts": [
+                {
+                    "operation_id": "op.phone",
+                    "capability_id": "lookup_customer",
+                    "resource_id": "resource.phone",
+                    "request": {"query": {"phone": {"semantic_type": "phone_number"}}},
+                    "response": {"items_path": "items", "fields": {"items[].id": {"semantic_type": "customer_id"}}},
+                }
+            ],
+            "operation_variants": [
+                {"variant_id": "variant.phone", "operation_id": "op.phone", "capability_id": "lookup_customer"}
+            ],
+            "field_mappings": [
+                {
+                    "id": "fm.phone.id",
+                    "operation_id": "op.phone",
+                    "direction": "response",
+                    "raw_name": "items[].id",
+                    "semantic_type_id": "customer_id",
+                }
+            ],
+            "semantic_join_rules": [
+                {
+                    "id": "join.phone.customer",
+                    "from_entity_id": "Customer",
+                    "from_semantic_type_id": "phone_number",
+                    "to_entity_id": "Customer",
+                    "to_semantic_type_id": "phone_number",
+                }
+            ],
+            "planning_examples": [
+                {"id": "example.lookup_customer", "question": "전화번호로 고객 찾아줘", "expected_capability_ids": ["lookup_customer"]}
+            ],
+            "capability_implementations": [
+                {"id": "impl.phone", "operation_id": "op.phone", "capability_id": "lookup_customer"}
+            ],
+        }
+
+        _validate_llm_analysis(analysis)
+
     def test_contract_fields_collects_all_request_sections(self) -> None:
         fields = _contract_fields(
             {

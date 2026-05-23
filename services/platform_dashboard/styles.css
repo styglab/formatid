@@ -303,8 +303,7 @@ h2 {
   grid-template-columns: minmax(560px, 1.35fr) minmax(360px, 0.65fr);
 }
 
-.dashboard-layout,
-.g2b-dashboard-layout {
+.dashboard-layout {
   align-items: stretch;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -663,13 +662,11 @@ td.wrap {
   .app-control-grid,
   .app-metrics,
   .pipeline-layout,
-  .dashboard-layout,
-  .g2b-dashboard-layout {
+  .dashboard-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .dashboard-layout,
-  .g2b-dashboard-layout {
+  .dashboard-layout {
     grid-template-columns: 1fr;
   }
 
@@ -729,7 +726,6 @@ td.wrap {
   .app-metrics,
   .pipeline-layout,
   .dashboard-layout,
-  .g2b-dashboard-layout,
   .summary-card .app-metrics {
     grid-template-columns: 1fr;
   }
