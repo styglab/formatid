@@ -47,12 +47,18 @@ def read_dashboard_catalog() -> dict:
     catalog = load_catalog()
     return {
         "semantic_types": catalog.get("semantic_types", {}),
+        "entities": catalog.get("entities", {}),
+        "entity_identifiers": catalog.get("entity_identifiers", {}),
         "capabilities": catalog.get("capabilities", {}),
+        "capability_entity_links": catalog.get("capability_entity_links", {}),
+        "capability_dependencies": catalog.get("capability_dependencies", {}),
+        "planning_examples": catalog.get("planning_examples", {}),
         "resources": catalog.get("resources", {}),
         "operations": catalog.get("operations", {}),
         "operation_contracts": catalog.get("operation_contracts", {}),
         "operation_variants": catalog.get("operation_variants", {}),
         "field_mappings": catalog.get("field_mappings", {}),
+        "semantic_join_rules": catalog.get("semantic_join_rules", {}),
         "capability_implementations": catalog.get("capability_implementations", []),
         "capability_documents": catalog.get("capability_documents", {}),
     }

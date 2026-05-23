@@ -10,9 +10,14 @@ class CatalogPaginationTests(unittest.TestCase):
         specs = _catalog_section_specs()
 
         self.assertIn("capabilities", specs)
+        self.assertIn("entities", specs)
+        self.assertIn("entity_identifiers", specs)
+        self.assertIn("semantic_join_rules", specs)
+        self.assertIn("planning_examples", specs)
         self.assertIn("operation_contracts", specs)
         self.assertIn("capability_implementations", specs)
         self.assertEqual("sp_capabilities", specs["capabilities"]["table"])
+        self.assertEqual("sp_entities", specs["entities"]["table"])
         self.assertEqual("operation_id", specs["operation_contracts"]["key"])
 
 

@@ -131,3 +131,64 @@ Provider-specific response shapes must be declared in
 Fields may use path expressions such as `data[].tax_type`, `[].cur_unit`, or
 `response.body.items.item[].untyCntrctNo`. The path evaluator is generic; the
 path values themselves come from approved catalog data.
+
+## Request Transform / Validation
+
+Planner output contains semantic values. It is allowed to produce
+`phone_number: "01022223333"` or `phone_number: "010-2222-3333"`. The final raw
+provider representation is decided by the selected operation contract.
+
+The executor supports declarative request rules:
+
+- `enum_mapping`
+- `strip` / `strip_chars`
+- `remove_whitespace`
+- `digits_only`
+- `uppercase` / `lowercase`
+- `date_format`
+- `phone_format`
+- `pattern`
+- `enum`
+- `min_length`
+- `max_length`
+
+Example:
+
+```json
+{
+  "request": {
+    "query": {
+      "phone": {
+        "semantic_type": "phone_number",
+        "transform": {
+          "name": "phone_format",
+          "style": "kr_mobile_hyphen"
+        },
+        "pattern": "^01[016789]-[0-9]{3,4}-[0-9]{4}$"
+      }
+    }
+  }
+}
+```
+
+The executor applies the transform, validates the result, and returns
+`validation_error` before any provider call if the declared rule fails. This
+keeps endpoint-specific formatting in reviewed catalog data instead of runtime
+provider code.
+
+## Result Schema
+
+`semantic_query` returns structured MCP-friendly data. The stable top-level
+fields include:
+
+- `status`
+- `result_status`
+- `selected_capabilities`
+- `execution_graph`
+- `results`
+- `errors`
+- `evidence`
+
+`result_status` is more specific than execution status and may include values
+such as `executed_with_items`, `executed_empty`, `provider_error`,
+`validation_error`, `not_executable`, or `capability_not_found`.

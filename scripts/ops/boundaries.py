@@ -7,19 +7,11 @@ from scripts.ops.common import PROJECT_ROOT
 
 
 SERVICE_FORBIDDEN_SUBSTRINGS = (
-    "G2B_INGEST",
     "PUBLIC_API_KEY",
-    "g2b_ingest",
-    "g2b_summary",
-    "procurement",
 )
 SERVICE_FORBIDDEN_CALLS = ()
 CORE_FORBIDDEN_SUBSTRINGS = (
-    "G2B_INGEST",
     "PUBLIC_API_KEY",
-    "g2b_ingest",
-    "g2b_summary",
-    "procurement",
 )
 
 

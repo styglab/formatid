@@ -8,8 +8,19 @@ const { useEffect, useMemo, useRef, useState } = React;
 
 const SECTIONS = [
   { key: "capabilities", label: "Capabilities", icon: "C" },
+  { key: "semantic_graph", label: "Semantic Graph", icon: "S" },
   { key: "execution", label: "Execution", icon: "E" },
   { key: "proposals", label: "Governance", icon: "G" },
+];
+
+const GRAPH_SECTIONS = [
+  { key: "entities", label: "Entities" },
+  { key: "entity_identifiers", label: "Identifiers" },
+  { key: "semantic_types", label: "Semantic Types" },
+  { key: "semantic_join_rules", label: "Join Rules" },
+  { key: "capability_entity_links", label: "Capability Entities" },
+  { key: "capability_dependencies", label: "Dependencies" },
+  { key: "planning_examples", label: "Examples" },
 ];
 
 const EXECUTION_SECTIONS = [
@@ -18,7 +29,7 @@ const EXECUTION_SECTIONS = [
   { key: "operation_contracts", label: "Contracts" },
   { key: "operation_variants", label: "Variants" },
   { key: "field_mappings", label: "Mappings" },
-  { key: "semantic_types", label: "Semantic Types" },
+  { key: "capability_implementations", label: "Implementations" },
 ];
 
 async function fetchJson(url) {
@@ -37,6 +48,7 @@ function App() {
   const [proposals, setProposals] = useState(null);
   const [endpointChecks, setEndpointChecks] = useState(null);
   const [activeSection, setActiveSection] = useState("capabilities");
+  const [activeGraphSection, setActiveGraphSection] = useState("entities");
   const [activeExecutionSection, setActiveExecutionSection] = useState("operations");
   const [selectedKey, setSelectedKey] = useState(null);
   const [pageData, setPageData] = useState(null);
@@ -81,7 +93,11 @@ function App() {
       setPageData(null);
       return;
     }
-    const catalogSection = section === "execution" ? activeExecutionSection : section;
+    const catalogSection = section === "execution"
+      ? activeExecutionSection
+      : section === "semantic_graph"
+        ? activeGraphSection
+        : section;
     setPageLoading(true);
     try {
       const data = await fetchJson(`api/catalog/sections/${encodeURIComponent(catalogSection)}?limit=${pageSize}&offset=${offset}`);
@@ -98,15 +114,15 @@ function App() {
     setSelectedKey(null);
     setPageData(null);
     setPageOffset(0);
-  }, [activeSection, activeExecutionSection]);
+  }, [activeSection, activeGraphSection, activeExecutionSection]);
 
   useEffect(() => {
     loadPage(activeSection, pageOffset);
-  }, [activeSection, activeExecutionSection, pageOffset]);
+  }, [activeSection, activeGraphSection, activeExecutionSection, pageOffset]);
 
   const rows = useMemo(
-    () => pageData ? pageRows(pageData, activeSection, activeExecutionSection) : sectionRows(catalog, sources, proposals, activeSection, activeExecutionSection),
-    [catalog, sources, proposals, pageData, activeSection, activeExecutionSection]
+    () => pageData ? pageRows(pageData, activeSection, activeGraphSection, activeExecutionSection) : sectionRows(catalog, sources, proposals, activeSection, activeGraphSection, activeExecutionSection),
+    [catalog, sources, proposals, pageData, activeSection, activeGraphSection, activeExecutionSection]
   );
   const globalRows = useMemo(() => allRows(catalog, sources, proposals), [catalog, sources, proposals]);
   const searchResults = useMemo(() => filterRows(globalRows, query), [globalRows, query]);
@@ -163,6 +179,7 @@ function App() {
         onSelect: (row) => {
           setActiveSection(row.section);
           if (row.executionSection) setActiveExecutionSection(row.executionSection);
+          if (row.graphSection) setActiveGraphSection(row.graphSection);
           setSelectedKey(row.key);
         },
       }),
@@ -176,6 +193,8 @@ function App() {
         React.createElement("section", { className: "grid layout" },
           React.createElement(ListCard, {
             activeSection,
+            activeGraphSection,
+            setActiveGraphSection,
             activeExecutionSection,
             setActiveExecutionSection,
             counts,
@@ -279,7 +298,7 @@ function Sidebar({ activeSection, setActiveSection, counts }) {
 function Kpis({ counts, catalog, meta, sourceSummary }) {
   return React.createElement("section", { className: "grid kpis" },
     React.createElement(Kpi, { label: "Capabilities", value: counts.capabilities || 0, detail: `${countObject(catalog?.capability_documents)} documents` }),
-    React.createElement(Kpi, { label: "Semantic Types", value: counts.semantic_types || 0, detail: "Planner argument types" }),
+    React.createElement(Kpi, { label: "Entities", value: counts.entities || 0, detail: `${counts.semantic_join_rules || 0} join rules` }),
     React.createElement(Kpi, { label: "Operations", value: counts.operations || 0, detail: `${countObject(catalog?.operation_contracts)} contracts` }),
     React.createElement(Kpi, { label: "Variants", value: counts.operation_variants || 0, detail: `${countObject(catalog?.field_mappings)} mappings` }),
     React.createElement(Kpi, { label: "Proposals", value: counts.proposals || 0, detail: "Pending review" })
@@ -296,6 +315,8 @@ function Kpi({ label, value, detail }) {
 
 function ListCard({
   activeSection,
+  activeGraphSection,
+  setActiveGraphSection,
   activeExecutionSection,
   setActiveExecutionSection,
   counts,
@@ -326,6 +347,12 @@ function ListCard({
         onPage,
       })
     ),
+    activeSection === "semantic_graph" && React.createElement(SectionTabs, {
+      sections: GRAPH_SECTIONS,
+      activeKey: activeGraphSection,
+      setActiveKey: setActiveGraphSection,
+      counts,
+    }),
     activeSection === "execution" && React.createElement(ExecutionTabs, {
       activeExecutionSection,
       setActiveExecutionSection,
@@ -396,12 +423,21 @@ function visiblePages(currentPage, pageCount) {
 }
 
 function ExecutionTabs({ activeExecutionSection, setActiveExecutionSection, counts }) {
+  return React.createElement(SectionTabs, {
+    sections: EXECUTION_SECTIONS,
+    activeKey: activeExecutionSection,
+    setActiveKey: setActiveExecutionSection,
+    counts,
+  });
+}
+
+function SectionTabs({ sections, activeKey, setActiveKey, counts }) {
   return React.createElement("div", { className: "subnav" },
-    EXECUTION_SECTIONS.map((section) =>
+    sections.map((section) =>
       React.createElement("button", {
-        className: `subnav-item ${activeExecutionSection === section.key ? "active" : ""}`,
+        className: `subnav-item ${activeKey === section.key ? "active" : ""}`,
         key: section.key,
-        onClick: () => setActiveExecutionSection(section.key),
+        onClick: () => setActiveKey(section.key),
       },
         React.createElement("span", null, section.label),
         React.createElement("span", { className: "subnav-count" }, counts[section.key] || 0)
@@ -887,9 +923,12 @@ function ProviderMappings({ providerMappings }) {
   );
 }
 
-function sectionRows(catalog, sources, proposals, section, activeExecutionSection = "operations") {
+function sectionRows(catalog, sources, proposals, section, activeGraphSection = "entities", activeExecutionSection = "operations") {
   if (section === "proposals") {
     return proposalRows(proposals);
+  }
+  if (section === "semantic_graph") {
+    return graphRows(catalog, activeGraphSection);
   }
   if (section === "execution") {
     return executionRows(catalog, activeExecutionSection);
@@ -906,6 +945,25 @@ function sectionRows(catalog, sources, proposals, section, activeExecutionSectio
       entity: data.entity,
       kind: section.slice(0, -1),
       summary: summaryFor(section, data),
+    };
+  });
+}
+
+function graphRows(catalog, activeGraphSection) {
+  if (!catalog) return [];
+  const definition = GRAPH_SECTIONS.find((item) => item.key === activeGraphSection) || GRAPH_SECTIONS[0];
+  const source = catalog[definition.key] || {};
+  return Object.entries(source).map(([key, value]) => {
+    const data = value && typeof value === "object" ? value : {};
+    return {
+      key: `${definition.key}:${key}`,
+      section: "semantic_graph",
+      graphSection: definition.key,
+      value: { ...data, __catalog_section: definition.key },
+      type: definition.label,
+      entity: data.entity_id || data.entity,
+      kind: definition.label,
+      summary: summaryFor(definition.key, data) || key,
     };
   });
 }
@@ -929,21 +987,27 @@ function executionRows(catalog, activeExecutionSection) {
   });
 }
 
-function pageRows(pageData, activeSection, activeExecutionSection) {
+function pageRows(pageData, activeSection, activeGraphSection, activeExecutionSection) {
   const section = pageData?.section || activeSection;
   const items = Array.isArray(pageData?.items) ? pageData.items : [];
   return items.map((item) => {
     const key = String(item.id || "");
     const data = item.value && typeof item.value === "object" ? item.value : {};
+    const graphSection = activeSection === "semantic_graph" ? activeGraphSection : null;
     const executionSection = activeSection === "execution" ? activeExecutionSection : null;
     return {
-      key: executionSection ? `${section}:${key}` : key,
+      key: executionSection || graphSection ? `${section}:${key}` : key,
       section: activeSection,
+      graphSection,
       executionSection,
       value: { ...data, __catalog_section: section },
-      type: executionSection ? (EXECUTION_SECTIONS.find((entry) => entry.key === section)?.label || section) : data.type,
-      entity: data.entity,
-      kind: executionSection ? section : activeSection.slice(0, -1),
+      type: executionSection
+        ? (EXECUTION_SECTIONS.find((entry) => entry.key === section)?.label || section)
+        : graphSection
+          ? (GRAPH_SECTIONS.find((entry) => entry.key === section)?.label || section)
+          : data.type,
+      entity: data.entity_id || data.entity,
+      kind: executionSection || graphSection ? section : activeSection.slice(0, -1),
       summary: summaryFor(section, data) || key,
     };
   });
@@ -994,6 +1058,7 @@ function proposalSummary(proposal) {
 function allRows(catalog, sources, proposals) {
   return [
     ...sectionRows(catalog, sources, proposals, "capabilities"),
+    ...GRAPH_SECTIONS.flatMap((section) => graphRows(catalog, section.key)),
     ...EXECUTION_SECTIONS.flatMap((section) => executionRows(catalog, section.key)),
     ...sectionRows(catalog, sources, proposals, "proposals"),
   ];
@@ -1008,7 +1073,13 @@ function summaryFor(section, data) {
   if (data.description) return data.description;
   if (section === "proposals") return proposalSummary(data);
   if (section === "capabilities") return data.description_ko || data.description || "";
+  if (section === "entities") return data.description_ko || data.name_ko || data.entity_type || "";
+  if (section === "entity_identifiers") return `${data.entity_id || "-"} -> ${data.semantic_type_id || "-"}`;
   if (section === "semantic_types") return data.description_ko || data.entity || "";
+  if (section === "semantic_join_rules") return `${data.from_semantic_type_id || "-"} -> ${data.to_semantic_type_id || "-"}`;
+  if (section === "capability_entity_links") return `${data.capability_id || "-"} ${data.role || ""} ${data.entity_id || "-"}`;
+  if (section === "capability_dependencies") return `${data.capability_id || "-"} -> ${data.depends_on_capability_id || "-"}`;
+  if (section === "planning_examples") return data.question || "";
   if (section === "resources") return data.base_url || data.name_ko || "";
   if (section === "operations") return `${data.method || "-"} ${data.path || ""}`.trim();
   if (section === "operation_contracts") return `${data.provider || "-"} ${data.method || ""} ${data.path || ""}`.trim();
@@ -1088,13 +1159,23 @@ function sectionCounts(catalog, sources, proposals) {
   return {
     capabilities: countObject(catalog?.capabilities),
     execution: countObject(catalog?.operations),
+    semantic_graph: countObject(catalog?.entities),
     proposals: proposalRows(proposals).length,
     semantic_types: countObject(catalog?.semantic_types),
+    entities: countObject(catalog?.entities),
+    entity_identifiers: countObject(catalog?.entity_identifiers),
+    semantic_join_rules: countObject(catalog?.semantic_join_rules),
+    capability_entity_links: countObject(catalog?.capability_entity_links),
+    capability_dependencies: countObject(catalog?.capability_dependencies),
+    planning_examples: countObject(catalog?.planning_examples),
     resources: countObject(catalog?.resources),
     operations: countObject(catalog?.operations),
     operation_contracts: countObject(catalog?.operation_contracts),
     operation_variants: countObject(catalog?.operation_variants),
     field_mappings: countObject(catalog?.field_mappings),
+    capability_implementations: Array.isArray(catalog?.capability_implementations)
+      ? catalog.capability_implementations.length
+      : countObject(catalog?.capability_implementations),
   };
 }
 

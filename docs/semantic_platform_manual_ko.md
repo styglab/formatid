@@ -4,6 +4,15 @@
 
 `services/semantic_platform`는 공공 API 명세를 읽어서 의미 기반 catalog를 만들고, 사용자의 질문을 실행 가능한 semantic execution DAG로 계획하는 서비스다.
 
+이 플랫폼은 단순한 공공데이터 API wrapper가 아니다. 목표는 다음에 가깝다.
+
+```text
+Semantic Agentic Data Platform
+LLM-native Public Data Orchestration Platform
+```
+
+핵심은 `LLM이 API를 직접 호출하게 하는 것`이 아니라, LLM이 안정적으로 의미를 이해하고 결정 가능한 실행 구조를 만들도록 하는 것이다. MCP는 실행 계층이고, 의미 계층은 semantic platform이 담당한다.
+
 전체 흐름은 다음과 같다.
 
 ```text
@@ -28,6 +37,26 @@ apps/pubdata_mcp           = 어떻게 provider API를 호출할지 담당하는
 ```
 
 `semantic_platform`는 provider HTTP 호출, pagination, retry, API key 처리, provider SDK quirks를 소유하지 않는다. 그런 실행 세부 사항은 `apps/pubdata_mcp`가 담당한다.
+
+## 설계 원칙
+
+```text
+MCP / Tool Layer  = 호출 계층
+Semantic Layer   = 의미 계층
+Planner          = 추론 / DAG 생성
+Execution Engine = deterministic 실행
+Governance       = review / lineage / 품질 관리
+```
+
+중요한 원칙:
+
+```text
+API spec embedding만으로는 부족하다.
+endpoint가 아니라 capability를 retrieval 단위로 삼는다.
+planner는 raw API field가 아니라 semantic argument를 만든다.
+executor는 LLM이 아니라 approved contract를 해석하는 deterministic interpreter다.
+provider별 표현 차이는 코드가 아니라 operation_contract field rule에 저장한다.
+```
 
 ## 핵심 Catalog
 
@@ -149,13 +178,19 @@ sp_resources
 sp_operations
 sp_operation_fields
 sp_semantic_types
+sp_entities
+sp_entity_identifiers
 sp_capabilities
+sp_capability_entity_links
+sp_capability_dependencies
 sp_capability_documents
 sp_capability_document_vectors
 sp_operation_contracts
 sp_operation_variants
 sp_field_mappings
 sp_capability_implementations
+sp_semantic_join_rules
+sp_planning_examples
 sp_endpoint_checks
 sp_execution_graphs
 sp_planner_feedback
@@ -174,6 +209,31 @@ container path: /data/models/embeddings/BGE-m3-ko
 model:          BGE-m3-ko
 dimensions:     1024
 ```
+
+## Semantic Entity Registry
+
+multi-step orchestration을 안정화하려면 `SemanticType`만으로는 부족하다. 다음 단계에서는 lightweight entity registry와 join rule이 필요하다.
+
+예:
+
+```text
+Entity: Business
+Identifiers:
+  business_registration_number
+  corporate_registration_number
+  supplier_id
+
+Entity: Contract
+Identifiers:
+  integrated_contract_number
+  contract_number
+
+Join Rule:
+  Business.business_registration_number
+    -> Contract.business_registration_number
+```
+
+초기에는 RDF/OWL-first로 가지 않는다. Postgres catalog 위에 `entity`, `identifier semantic type`, `join rule`, `capability dependency` 정도를 관리하고, 필요하면 나중에 RDF export를 붙인다.
 
 ## Ingestion Graph
 
@@ -477,12 +537,30 @@ MCP executor는 planner node를 다음 순서로 처리한다.
 1. variant_id로 operation_id와 fixed arguments 확인
 2. operation_contract.request의 semantic_type mapping 확인
 3. semantic_arguments를 raw provider arguments로 변환
-4. operation_variant.fixed_raw_arguments 병합
-5. auth metadata에 따라 API key 주입
-6. HTTP GET/POST 호출
-7. operation_contract.response와 field_mappings로 결과 해석
-8. structured result와 evidence 반환
+4. operation_contract request field rule로 transform/validation
+5. operation_variant.fixed_raw_arguments 병합
+6. auth metadata에 따라 API key 주입
+7. HTTP GET/POST 호출
+8. operation_contract.response와 field_mappings로 결과 해석
+9. structured result와 evidence 반환
 ```
+
+request field rule 예:
+
+```json
+{
+  "phone": {
+    "semantic_type": "phone_number",
+    "transform": {
+      "name": "phone_format",
+      "style": "kr_mobile_hyphen"
+    },
+    "pattern": "^01[016789]-[0-9]{3,4}-[0-9]{4}$"
+  }
+}
+```
+
+planner가 `phone_number: "01022223333"`을 넘겨도 executor는 contract에 따라 `010-2222-3333`으로 변환하고 pattern을 검증한다. 검증에 실패하면 provider API를 호출하지 않고 `validation_error`를 반환한다.
 
 예를 들어 다음 semantic arguments가 들어오면:
 
@@ -558,6 +636,7 @@ semantic platform API:
 
 ```text
 GET  /semantic/catalog
+GET  /catalog/sections/{section}
 GET  /semantic/execution/contracts
 GET  /semantic/capability-documents
 POST /semantic/capability-documents/rebuild
@@ -596,13 +675,19 @@ pgvector hybrid retrieval
 planner API
 codex_manual manual_plan validation
 pubdata_mcp generic HTTP executor
+contract 기반 request transform/validation
 실제 공공 API 호출
 structured result 반환
+dashboard catalog pagination
+dashboard contract/variant/check review
 ```
 
 아직 보강이 필요한 것:
 
 ```text
+Semantic Entity Registry와 Join Rule
+Planner DAG schema validator
+질문 예시 dataset 기반 retrieval/planner 평가
 LLM planner가 ambiguous/missing capability case를 올바르게 not_found 처리하는지 평가하기
 feedback 기반 reindex/evaluation set 추가하기
 ```

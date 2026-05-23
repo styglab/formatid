@@ -2,11 +2,15 @@
 
 ## Purpose
 
-This repository is an AI-ready data platform. Keep the structure simple and keep domain meaning in apps.
+This repository is an AI-ready data platform. Keep the structure simple and keep domain meaning out of generic runtime code.
 
 ```text
-Raw sources -> canonical data -> app semantic layer -> MCP / RAG / domain apps
+Raw API documents -> semantic capability graph -> LLM planning -> MCP execution
 ```
+
+The current folder ownership guide is documented in
+`docs/folder_structure_ko.md`. Keep this file and that guide aligned when the
+top-level structure changes.
 
 ## Layers
 
@@ -19,7 +23,6 @@ Generic platform code only:
 - `core/runtime/runtime_db`: Postgres connection, checkpoint, and service observability schema helpers
 - `core/observability`: shared log and retention helpers
 - `core/contracts`: stable cross-app contracts such as execution identity
-- `core/semantic`: generic semantic object/document contracts
 
 Do not put app names, procurement fields, business rules, or app orchestration in `core/*`.
 
@@ -47,8 +50,6 @@ Apps own orchestration, business rules, persistence, ontology, semantic transfor
 
 Current apps:
 
-- `apps/g2b/pipeline`
-- `apps/g2b/mcp`
 - `apps/pubdata_mcp`
 
 ### Semantic platform boundary
@@ -255,10 +256,11 @@ execution planning, and any future LLM-assisted planning path.
 - App ontology, relationship names, semantic tags, and semantic document builders belong in `apps/<app>/app/semantic`.
 - Semantic planning belongs in `services/semantic_platform`; provider execution belongs in `apps/pubdata_mcp`.
 - `services/semantic_platform/worker` owns manual/background ingestion jobs and Prefect manual deployments. Do not add schedules until explicitly requested.
-- `core/semantic` contains contracts only.
 - Prefect control plane manifests live in `services/prefect`; app-specific Prefect workers live under `apps/<app>`.
 - Compose is generated from manifests. Do not hand-edit `deploy/compose/docker-compose.yml` except to inspect generated output.
 - Secret values must stay in env files, not manifests or payloads.
+- Retired code belongs under `tmp/retired_apps` or `tmp/retired_core` and must
+  not be imported by active runtime paths.
 
 ## Recommended App Structure
 

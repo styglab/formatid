@@ -185,14 +185,10 @@ async def _check_service_health(service_name: str) -> dict[str, Any]:
             "role": "Prefect background services",
             "detail": "Uses Prefect API control plane",
         }
-    if service_name == "g2b-pipeline-worker":
-        return await _check_prefect_worker(service_name, "g2b-pipeline-pool")
-
     url_by_service = {
         "nginx": "http://nginx/health/ready",
         "platform-dashboard": "http://platform-dashboard/",
         "prefect-server": "http://prefect-server:4200/api/health",
-        "g2b-mcp": "http://g2b-mcp:8000/health/ready",
         "pubdata-mcp": "http://pubdata-mcp:8000/health/ready",
     }
     url = url_by_service.get(service_name)
@@ -322,7 +318,6 @@ def _service_address(service_name: str, url: str) -> str:
         "nginx": "http://nginx",
         "platform-dashboard": "http://platform-dashboard",
         "prefect-server": "http://prefect-server:4200",
-        "g2b-mcp": "http://g2b-mcp:8000",
         "pubdata-mcp": "http://pubdata-mcp:8000",
     }
     return address_by_service.get(service_name, url)
@@ -339,8 +334,6 @@ def _service_role(service_name: str) -> str:
         "prefect-postgres": "Prefect database",
         "prefect-redis": "Prefect queue/cache",
         "prefect-services": "Prefect background services",
-        "g2b-pipeline-worker": "Prefect worker",
-        "g2b-mcp": "MCP server",
         "pubdata-mcp": "MCP server",
     }
     return role_by_service.get(service_name, "Service")

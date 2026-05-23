@@ -6,7 +6,7 @@ COPY apps/pubdata_mcp/infra/image/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY apps/pubdata_mcp /app/apps/pubdata_mcp
-COPY core/mcp_runtime /app/core/mcp_runtime
+COPY core/runtime/mcp /app/core/runtime/mcp
 
 ENV PYTHONPATH=/app
 

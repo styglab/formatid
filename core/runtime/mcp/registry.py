@@ -4,8 +4,8 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from core.mcp_runtime.importers import import_string
-from core.mcp_runtime.loader import load_manifest, load_tool_specs, load_tools_dir, load_tools_file
+from core.runtime.mcp.importers import import_string
+from core.runtime.mcp.loader import load_manifest, load_tool_specs, load_tools_dir, load_tools_file
 
 
 TYPE_MAP = {

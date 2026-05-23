@@ -1,12 +1,26 @@
 # semantic_platform
 
 Postgres-backed semantic catalog and execution-planning platform for public API
-specifications.
+specifications. This is the repository's **Semantic Agentic Data Platform**
+control plane: it turns raw public API documents into reviewed semantic
+capabilities, executable contracts, and planner-ready runtime context.
 
 This service is the declarative semantic intelligence layer. It owns source
 evidence, endpoint metadata, field evidence, proposals, approved semantic
 catalog objects, capability retrieval metadata, and LLM execution planning.
 Provider HTTP execution remains in `apps/pubdata_mcp`.
+
+The product is not a public API wrapper. The target architecture is:
+
+```text
+Natural Language
+  -> Semantic Understanding
+  -> Capability Resolution
+  -> Execution Planning
+  -> API Orchestration
+  -> Semantic Data Integration
+  -> Structured Result / Answer Synthesis
+```
 
 ## Current Requirement
 
@@ -65,6 +79,8 @@ Contains:
 - tags/domains
 - related semantic types
 - capability naming policy
+- eventually, capability graph dependencies such as required upstream
+  resolution capabilities
 
 Example:
 
@@ -99,6 +115,10 @@ Contains:
 - `field_mappings`
 - `capability_implementations`
 - `endpoint_checks`
+
+Execution contracts are declarative. Runtime provider choices, control
+parameters, response paths, field mappings, request transforms, and validation
+rules must come from approved catalog data.
 
 Example:
 
@@ -150,6 +170,32 @@ and gives that context to the LLM before it proposes changes. Its purpose is to
 reuse existing canonical capability/semantic-type definitions and avoid creating
 duplicate endpoint-shaped capabilities.
 
+## Semantic Entity Registry
+
+`SemanticType` alone is not enough for multi-step orchestration. The platform
+must also maintain a lightweight semantic entity registry and join rules. The
+near-term model should remain simple and Postgres-backed:
+
+```text
+Entity
+  Business
+  Contract
+  Organization
+
+Identifier / SemanticType
+  business_registration_number
+  corporate_registration_number
+  integrated_contract_number
+
+Join Rule
+  Business.business_registration_number
+    -> Contract.business_registration_number
+```
+
+Do not start RDF/OWL-first. Keep this as a lightweight knowledge graph over
+entities, identifiers, capabilities, fields, restrictions, and joins. RDF export
+can be added later if needed.
+
 Desired ingestion shape:
 
 ```text
@@ -168,6 +214,27 @@ read_source
   -> build_capability_documents
   -> embed_capabilities
   -> upsert_vector_index
+```
+
+Ingestion LLM output should propose both semantic meaning and executable
+contracts. It should identify request field rules such as required fields,
+defaults, enums, patterns, examples, and transforms. The runtime executor only
+interprets approved rules; it must not infer them from provider names or Korean
+keywords.
+
+Request field rule shape:
+
+```json
+{
+  "semantic_type": "phone_number",
+  "required": true,
+  "transform": {
+    "name": "phone_format",
+    "style": "kr_mobile_hyphen"
+  },
+  "pattern": "^01[016789]-[0-9]{3,4}-[0-9]{4}$",
+  "examples": ["010-2222-3333"]
+}
 ```
 
 ### Source File Metadata
@@ -225,10 +292,16 @@ Implemented foundation:
 - BGE-m3-ko embedding service via `services/embedding`
 - Planner context starts from capability retrieval and validates the execution
   graph against approved execution contracts/variants
+- Section-level catalog pagination for dashboard/API use
+- Dashboard review screens for capability execution paths, operation contracts,
+  variants, endpoint checks, and raw catalog rows
 
 Still needs hardening:
 
 - retrieval evaluation set
+- examples dataset for question -> capability/variant selection
+- semantic entity registry and join-rule authoring/review
+- planner DAG schema validation and multi-step execution evaluation
 - automatic feedback-driven reindexing
 - LLM planner evaluation for ambiguous or missing capability cases
 
@@ -257,6 +330,34 @@ apps/pubdata_mcp           = imperative provider execution runtime
 - raw response parsing
 - normalization using approved contracts
 
+## Internal Module Boundaries
+
+Keep `services/semantic_platform` split by responsibility:
+
+```text
+api/        HTTP boundary only: catalog/proposal/planner endpoints
+dashboard/  browser UI only: consumes API data
+ingestion/  source documents -> evidence -> proposals -> optional apply
+planner/    user question + retrieved catalog context -> execution plan
+runtime/    planner/runtime context packaging helpers
+storage/    Postgres schema, repository, catalog persistence
+worker/     optional Prefect background/manual ingestion runner
+```
+
+Rules:
+
+- `api/` must not implement catalog mutation details directly; call domain or
+  repository APIs.
+- `dashboard/` must not encode provider/domain routing decisions.
+- `ingestion/` may probe candidate endpoints for evidence, but must not become
+  the provider execution runtime.
+- `planner/` must not call provider APIs.
+- `storage/` must not perform semantic/domain inference.
+- `worker/` is optional orchestration around ingestion; it must not contain a
+  separate ingestion implementation.
+- Provider execution, auth, pagination, retry, and raw response quirks belong
+  in `apps/pubdata_mcp`.
+
 ## Storage
 
 Postgres is the source of truth. YAML files are not the catalog source of truth.
@@ -276,12 +377,18 @@ sp_resources
 sp_operations
 sp_operation_fields
 sp_semantic_types
+sp_entities
+sp_entity_identifiers
 sp_capabilities
+sp_capability_entity_links
+sp_capability_dependencies
 sp_capability_documents
 sp_operation_contracts
 sp_operation_variants
 sp_field_mappings
 sp_capability_implementations
+sp_semantic_join_rules
+sp_planning_examples
 sp_endpoint_checks
 sp_execution_graphs
 sp_planner_feedback
@@ -289,6 +396,18 @@ sp_proposals
 sp_proposal_items
 sp_catalog_lineage
 ```
+
+Reset only semantic platform catalog data when starting a clean ingestion
+verification loop:
+
+```bash
+python3 scripts/ops.py semantic-catalog reset
+```
+
+This keeps the database, schema, extensions, env files, source documents, and
+model volumes intact. It clears `sp_*` semantic catalog rows, proposals,
+source/evidence snapshots, planner feedback, execution graphs, and capability
+vectors.
 
 Lineage is first-class:
 

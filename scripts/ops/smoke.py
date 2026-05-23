@@ -1,31 +1,27 @@
 from __future__ import annotations
 
+from core.catalog.registry import CatalogRegistry
 from scripts.ops.compose import compose
 
 
-PLATFORM_SMOKE_SERVICES = (
-    "postgres",
-    "redis",
-    "minio",
-    "qdrant",
-    "prefect-postgres",
-    "prefect-redis",
-    "prefect-server",
-    "prefect-services",
-    "platform-api",
-    "platform-dashboard",
-    "nginx",
-)
+def smoke_services() -> tuple[str, ...]:
+    registry = CatalogRegistry.load()
+    service_names = [
+        *(definition.service_name for definition in registry.active_platform_services),
+        *(definition.service_name for definition in registry.app_services),
+    ]
+    return tuple(dict.fromkeys(service_names))
 
 
-def run_compose_smoke_test() -> dict:
+def run_smoke_test() -> dict:
+    services = smoke_services()
     compose("down", "-v", "--remove-orphans", check=False)
 
     try:
-        compose("up", "-d", "--build", *PLATFORM_SMOKE_SERVICES)
-        ps_output = compose("ps", *PLATFORM_SMOKE_SERVICES)
+        compose("up", "-d", "--build", *services)
+        ps_output = compose("ps", *services)
         return {
-            "services": list(PLATFORM_SMOKE_SERVICES),
+            "services": list(services),
             "output": ps_output,
         }
     finally:

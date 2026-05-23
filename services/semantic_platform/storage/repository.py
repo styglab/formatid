@@ -152,6 +152,9 @@ class SemanticCatalogRepository:
                     id text primary key,
                     description_ko text,
                     entity text,
+                    value_kind text,
+                    unit text,
+                    canonical_format text,
                     value_shape jsonb not null default '{}'::jsonb,
                     value_contract jsonb not null default '{}'::jsonb,
                     aliases text[] not null default '{}',
@@ -159,6 +162,42 @@ class SemanticCatalogRepository:
                     provenance jsonb not null default '{}'::jsonb,
                     created_at timestamptz not null default now(),
                     updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute("alter table sp_semantic_types add column if not exists value_kind text")
+            conn.execute("alter table sp_semantic_types add column if not exists unit text")
+            conn.execute("alter table sp_semantic_types add column if not exists canonical_format text")
+            conn.execute(
+                """
+                create table if not exists sp_entities (
+                    id text primary key,
+                    name_ko text,
+                    description_ko text,
+                    entity_type text not null default 'entity',
+                    aliases text[] not null default '{}',
+                    properties jsonb not null default '{}'::jsonb,
+                    status text not null default 'active',
+                    provenance jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_entity_identifiers (
+                    id text primary key,
+                    entity_id text not null references sp_entities(id) on delete cascade,
+                    semantic_type_id text not null references sp_semantic_types(id) on delete restrict,
+                    identifier_role text not null default 'identifier',
+                    validation jsonb not null default '{}'::jsonb,
+                    aliases text[] not null default '{}',
+                    status text not null default 'active',
+                    provenance jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now(),
+                    unique(entity_id, semantic_type_id, identifier_role)
                 )
                 """
             )
@@ -173,6 +212,37 @@ class SemanticCatalogRepository:
                     examples jsonb not null default '[]'::jsonb,
                     status text not null default 'active',
                     provenance jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_capability_entity_links (
+                    id text primary key,
+                    capability_id text not null references sp_capabilities(id) on delete cascade,
+                    entity_id text not null references sp_entities(id) on delete cascade,
+                    role text not null,
+                    semantic_type_id text references sp_semantic_types(id) on delete set null,
+                    required boolean,
+                    status text not null default 'active',
+                    evidence jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_capability_dependencies (
+                    id text primary key,
+                    capability_id text not null references sp_capabilities(id) on delete cascade,
+                    depends_on_capability_id text not null references sp_capabilities(id) on delete cascade,
+                    dependency_type text not null default 'requires',
+                    semantic_type_id text references sp_semantic_types(id) on delete set null,
+                    status text not null default 'active',
+                    evidence jsonb not null default '{}'::jsonb,
                     created_at timestamptz not null default now(),
                     updated_at timestamptz not null default now()
                 )
@@ -347,6 +417,43 @@ class SemanticCatalogRepository:
             )
             conn.execute(
                 """
+                create table if not exists sp_semantic_join_rules (
+                    id text primary key,
+                    from_entity_id text references sp_entities(id) on delete cascade,
+                    from_semantic_type_id text not null references sp_semantic_types(id) on delete restrict,
+                    to_entity_id text references sp_entities(id) on delete cascade,
+                    to_semantic_type_id text not null references sp_semantic_types(id) on delete restrict,
+                    relation text not null default 'joinable_with',
+                    transform jsonb not null default '{}'::jsonb,
+                    confidence numeric,
+                    status text not null default 'active',
+                    evidence jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_planning_examples (
+                    id text primary key,
+                    question text not null,
+                    expected_capability_ids text[] not null default '{}',
+                    expected_operation_ids text[] not null default '{}',
+                    expected_variant_ids text[] not null default '{}',
+                    expected_arguments jsonb not null default '{}'::jsonb,
+                    expected_graph jsonb not null default '{}'::jsonb,
+                    tags text[] not null default '{}',
+                    source text,
+                    status text not null default 'active',
+                    provenance jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
                 create table if not exists sp_execution_graphs (
                     id text primary key,
                     query text not null,
@@ -387,6 +494,25 @@ class SemanticCatalogRepository:
             conn.execute("alter table sp_endpoint_checks add column if not exists proposal_id text")
             conn.execute("alter table sp_endpoint_checks add column if not exists proposal_item_id text")
             conn.execute("create index if not exists sp_operation_fields_operation_idx on sp_operation_fields(operation_id)")
+            conn.execute("create index if not exists sp_entity_identifiers_entity_idx on sp_entity_identifiers(entity_id)")
+            conn.execute("create index if not exists sp_entity_identifiers_semantic_type_idx on sp_entity_identifiers(semantic_type_id)")
+            conn.execute("create index if not exists sp_capability_entity_links_capability_idx on sp_capability_entity_links(capability_id)")
+            conn.execute("create index if not exists sp_capability_dependencies_capability_idx on sp_capability_dependencies(capability_id)")
+            conn.execute(
+                """
+                create unique index if not exists sp_capability_entity_links_unique_idx
+                on sp_capability_entity_links(capability_id, entity_id, role, coalesce(semantic_type_id, ''))
+                """
+            )
+            conn.execute(
+                """
+                create unique index if not exists sp_capability_dependencies_unique_idx
+                on sp_capability_dependencies(capability_id, depends_on_capability_id, dependency_type, coalesce(semantic_type_id, ''))
+                """
+            )
+            conn.execute("create index if not exists sp_semantic_join_rules_from_idx on sp_semantic_join_rules(from_entity_id, from_semantic_type_id)")
+            conn.execute("create index if not exists sp_semantic_join_rules_to_idx on sp_semantic_join_rules(to_entity_id, to_semantic_type_id)")
+            conn.execute("create index if not exists sp_planning_examples_status_idx on sp_planning_examples(status)")
             conn.execute("create index if not exists sp_source_evidence_snapshots_source_idx on sp_source_evidence_snapshots(source_document_id, snapshot_type)")
             conn.execute(
                 """
@@ -418,6 +544,43 @@ class SemanticCatalogRepository:
                 """
             )
             conn.commit()
+
+    def reset_catalog(self) -> dict[str, Any]:
+        """Clear semantic platform catalog data while keeping schema and extensions."""
+        self.ensure_schema()
+        tables = _semantic_catalog_tables()
+        before = self._table_counts(tables)
+        with self.connect() as conn:
+            existing_tables = [
+                table
+                for table in tables
+                if conn.execute("select to_regclass(%s) as table_name", (f"public.{table}",)).fetchone()["table_name"]
+            ]
+            if existing_tables:
+                quoted_tables = ", ".join(existing_tables)
+                conn.execute(f"truncate table {quoted_tables} restart identity cascade")
+            conn.commit()
+        after = self._table_counts(tables)
+        return {
+            "status": "reset",
+            "tables": tables,
+            "before": before,
+            "after": after,
+        }
+
+    def _table_counts(self, tables: list[str]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        with self.connect() as conn:
+            for table in tables:
+                exists = conn.execute("select to_regclass(%s) as table_name", (f"public.{table}",)).fetchone()[
+                    "table_name"
+                ]
+                if not exists:
+                    counts[table] = 0
+                    continue
+                row = conn.execute(f"select count(*) as count from {table}").fetchone()
+                counts[table] = int(row["count"] or 0)
+        return counts
 
     def _ensure_vector_extension(self, conn: Any) -> bool:
         try:
@@ -1116,7 +1279,11 @@ class SemanticCatalogRepository:
                   case item_type
                     when 'resource' then 10
                     when 'semantic_type' then 20
+                    when 'entity' then 25
+                    when 'entity_identifier' then 26
                     when 'capability' then 30
+                    when 'capability_entity_link' then 32
+                    when 'capability_dependency' then 33
                     when 'capability_document' then 35
                     when 'operation' then 40
                     when 'operation_field' then 50
@@ -1124,6 +1291,8 @@ class SemanticCatalogRepository:
                     when 'operation_variant' then 70
                     when 'field_mapping' then 80
                     when 'capability_implementation' then 90
+                    when 'semantic_join_rule' then 95
+                    when 'planning_example' then 96
                     else 100
                   end,
                   id
@@ -1143,8 +1312,16 @@ class SemanticCatalogRepository:
                     self._apply_operation_field(conn, payload)
                 elif item_type == "semantic_type":
                     self._apply_semantic_type(conn, payload)
+                elif item_type == "entity":
+                    self._apply_entity(conn, payload)
+                elif item_type == "entity_identifier":
+                    self._apply_entity_identifier(conn, payload)
                 elif item_type == "capability":
                     self._apply_capability(conn, payload)
+                elif item_type == "capability_entity_link":
+                    self._apply_capability_entity_link(conn, payload)
+                elif item_type == "capability_dependency":
+                    self._apply_capability_dependency(conn, payload)
                 elif item_type == "capability_document":
                     self._apply_capability_document(conn, payload)
                 elif item_type == "operation_contract":
@@ -1155,6 +1332,10 @@ class SemanticCatalogRepository:
                     self._apply_field_mapping(conn, payload)
                 elif item_type == "capability_implementation":
                     self._apply_capability_implementation(conn, payload)
+                elif item_type == "semantic_join_rule":
+                    self._apply_semantic_join_rule(conn, payload)
+                elif item_type == "planning_example":
+                    self._apply_planning_example(conn, payload)
                 else:
                     continue
                 conn.execute(
@@ -1421,6 +1602,41 @@ class SemanticCatalogRepository:
             )
             semantic_type_ids.update(str(row.get("semantic_type_id") or "") for row in field_mappings.values())
             semantic_type_ids.discard("")
+            capability_entity_links = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_capability_entity_links
+                    where status in ('active', 'approved') and capability_id = any(%s)
+                    order by capability_id, role, entity_id
+                    """,
+                    (list(capability_ids),),
+                ).fetchall()
+            )
+            capability_dependencies = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_capability_dependencies
+                    where status in ('active', 'approved') and capability_id = any(%s)
+                    order by capability_id, dependency_type, depends_on_capability_id
+                    """,
+                    (list(capability_ids),),
+                ).fetchall()
+            )
+            entity_ids = {
+                str(row.get("entity_id") or "")
+                for row in capability_entity_links.values()
+                if row.get("entity_id")
+            }
+            semantic_type_ids.update(
+                str(row.get("semantic_type_id") or "")
+                for row in capability_entity_links.values()
+                if row.get("semantic_type_id")
+            )
+            semantic_type_ids.update(
+                str(row.get("semantic_type_id") or "")
+                for row in capability_dependencies.values()
+                if row.get("semantic_type_id")
+            )
             operation_field_ids = {
                 str(row.get("operation_field_id") or "")
                 for row in field_mappings.values()
@@ -1446,6 +1662,63 @@ class SemanticCatalogRepository:
                     (list(semantic_type_ids),),
                 ).fetchall()
             )
+            entity_identifiers = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_entity_identifiers
+                    where status in ('active', 'approved')
+                      and (
+                        (%s::text[] <> '{}'::text[] and entity_id = any(%s))
+                        or (%s::text[] <> '{}'::text[] and semantic_type_id = any(%s))
+                      )
+                    order by entity_id, semantic_type_id
+                    """,
+                    (list(entity_ids), list(entity_ids), list(semantic_type_ids), list(semantic_type_ids)),
+                ).fetchall()
+            )
+            entity_ids.update(
+                str(row.get("entity_id") or "")
+                for row in entity_identifiers.values()
+                if row.get("entity_id")
+            )
+            entities = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_entities
+                    where status in ('active', 'approved') and id = any(%s)
+                    order by id
+                    """,
+                    (list(entity_ids),),
+                ).fetchall()
+            )
+            semantic_join_rules = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_semantic_join_rules
+                    where status in ('active', 'approved')
+                      and (
+                        from_semantic_type_id = any(%s)
+                        or to_semantic_type_id = any(%s)
+                        or from_entity_id = any(%s)
+                        or to_entity_id = any(%s)
+                      )
+                    order by id
+                    """,
+                    (list(semantic_type_ids), list(semantic_type_ids), list(entity_ids), list(entity_ids)),
+                ).fetchall()
+            )
+            planning_examples = _rows_by_id(
+                conn.execute(
+                    """
+                    select * from sp_planning_examples
+                    where status in ('active', 'approved')
+                      and (%s::text[] = '{}'::text[] or expected_capability_ids && %s::text[])
+                    order by updated_at desc, id
+                    limit 200
+                    """,
+                    (list(capability_ids), list(capability_ids)),
+                ).fetchall()
+            )
             operation_fields = [
                 dict(row)
                 for row in conn.execute(
@@ -1460,8 +1733,14 @@ class SemanticCatalogRepository:
             ]
             return {
                 "semantic_types": semantic_types,
+                "entities": entities,
+                "entity_identifiers": entity_identifiers,
+                "semantic_join_rules": semantic_join_rules,
                 "capabilities": capabilities,
                 "capability_documents": capability_documents,
+                "capability_entity_links": capability_entity_links,
+                "capability_dependencies": capability_dependencies,
+                "planning_examples": planning_examples,
                 "resources": resources,
                 "operations": operations,
                 "operation_fields": operation_fields,
@@ -1479,18 +1758,18 @@ class SemanticCatalogRepository:
         spec = specs[section]
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
-        search = str(q or "").strip()
-        where = list(spec["where"])
-        params: list[Any] = []
-        if search:
-            where.append(f"({spec['key']} ilike %s or to_jsonb({spec['alias']}.*)::text ilike %s)")
-            like = f"%{search}%"
-            params.extend([like, like])
-        where_sql = " and ".join(where) if where else "true"
         table = spec["table"]
         alias = spec["alias"]
         key = spec["key"]
         order_by = spec["order_by"]
+        search = str(q or "").strip()
+        where = list(spec["where"])
+        params: list[Any] = []
+        if search:
+            where.append(f"({alias}.{key} ilike %s or to_jsonb({alias})::text ilike %s)")
+            like = f"%{search}%"
+            params.extend([like, like])
+        where_sql = " and ".join(where) if where else "true"
         with self.connect() as conn:
             total = conn.execute(f"select count(*) as count from {table} {alias} where {where_sql}", params).fetchone()
             rows = conn.execute(
@@ -1686,12 +1965,18 @@ class SemanticCatalogRepository:
             "sp_operations",
             "sp_operation_fields",
             "sp_semantic_types",
+            "sp_entities",
+            "sp_entity_identifiers",
             "sp_capabilities",
+            "sp_capability_entity_links",
+            "sp_capability_dependencies",
             "sp_capability_documents",
             "sp_capability_document_vectors",
             "sp_operation_contracts",
             "sp_operation_variants",
             "sp_field_mappings",
+            "sp_semantic_join_rules",
+            "sp_planning_examples",
             "sp_endpoint_checks",
             "sp_execution_graphs",
             "sp_planner_feedback",
@@ -1806,11 +2091,15 @@ class SemanticCatalogRepository:
     def _apply_semantic_type(self, conn: Any, payload: dict[str, Any]) -> None:
         conn.execute(
             """
-            insert into sp_semantic_types(id, description_ko, entity, value_shape, value_contract, aliases, status, provenance, updated_at)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+            insert into sp_semantic_types(id, description_ko, entity, value_kind, unit, canonical_format,
+                                          value_shape, value_contract, aliases, status, provenance, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
             on conflict (id) do update set
                 description_ko = excluded.description_ko,
                 entity = excluded.entity,
+                value_kind = excluded.value_kind,
+                unit = excluded.unit,
+                canonical_format = excluded.canonical_format,
                 value_shape = excluded.value_shape,
                 value_contract = excluded.value_contract,
                 aliases = excluded.aliases,
@@ -1822,8 +2111,66 @@ class SemanticCatalogRepository:
                 payload["id"],
                 payload.get("description_ko"),
                 payload.get("entity"),
+                payload.get("value_kind"),
+                payload.get("unit"),
+                payload.get("canonical_format"),
                 _jsonb(payload.get("value_shape", {})),
                 _jsonb(payload.get("value_contract", {})),
+                payload.get("aliases", []),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("provenance", {})),
+            ),
+        )
+
+    def _apply_entity(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_entities(id, name_ko, description_ko, entity_type, aliases, properties, status, provenance, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                name_ko = excluded.name_ko,
+                description_ko = excluded.description_ko,
+                entity_type = excluded.entity_type,
+                aliases = excluded.aliases,
+                properties = excluded.properties,
+                status = excluded.status,
+                provenance = excluded.provenance,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload.get("name_ko"),
+                payload.get("description_ko"),
+                payload.get("entity_type", "entity"),
+                payload.get("aliases", []),
+                _jsonb(payload.get("properties", {})),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("provenance", {})),
+            ),
+        )
+
+    def _apply_entity_identifier(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_entity_identifiers(id, entity_id, semantic_type_id, identifier_role,
+                                              validation, aliases, status, provenance, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                entity_id = excluded.entity_id,
+                semantic_type_id = excluded.semantic_type_id,
+                identifier_role = excluded.identifier_role,
+                validation = excluded.validation,
+                aliases = excluded.aliases,
+                status = excluded.status,
+                provenance = excluded.provenance,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload["entity_id"],
+                payload["semantic_type_id"],
+                payload.get("identifier_role", "identifier"),
+                _jsonb(payload.get("validation", {})),
                 payload.get("aliases", []),
                 _applied_status(payload.get("status") or "active"),
                 _jsonb(payload.get("provenance", {})),
@@ -1899,6 +2246,60 @@ class SemanticCatalogRepository:
                 payload.get("vector_status", "not_embedded"),
                 _applied_status(payload.get("status") or "active"),
                 _jsonb(payload.get("provenance", {})),
+            ),
+        )
+
+    def _apply_capability_entity_link(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_capability_entity_links(id, capability_id, entity_id, role, semantic_type_id,
+                                                   required, status, evidence, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                capability_id = excluded.capability_id,
+                entity_id = excluded.entity_id,
+                role = excluded.role,
+                semantic_type_id = excluded.semantic_type_id,
+                required = excluded.required,
+                status = excluded.status,
+                evidence = excluded.evidence,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload["capability_id"],
+                payload["entity_id"],
+                payload["role"],
+                payload.get("semantic_type_id"),
+                payload.get("required"),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("evidence", {})),
+            ),
+        )
+
+    def _apply_capability_dependency(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_capability_dependencies(id, capability_id, depends_on_capability_id, dependency_type,
+                                                   semantic_type_id, status, evidence, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                capability_id = excluded.capability_id,
+                depends_on_capability_id = excluded.depends_on_capability_id,
+                dependency_type = excluded.dependency_type,
+                semantic_type_id = excluded.semantic_type_id,
+                status = excluded.status,
+                evidence = excluded.evidence,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload["capability_id"],
+                payload["depends_on_capability_id"],
+                payload.get("dependency_type", "requires"),
+                payload.get("semantic_type_id"),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("evidence", {})),
             ),
         )
 
@@ -2019,6 +2420,75 @@ class SemanticCatalogRepository:
             ),
         )
 
+    def _apply_semantic_join_rule(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_semantic_join_rules(id, from_entity_id, from_semantic_type_id,
+                                               to_entity_id, to_semantic_type_id, relation,
+                                               transform, confidence, status, evidence, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                from_entity_id = excluded.from_entity_id,
+                from_semantic_type_id = excluded.from_semantic_type_id,
+                to_entity_id = excluded.to_entity_id,
+                to_semantic_type_id = excluded.to_semantic_type_id,
+                relation = excluded.relation,
+                transform = excluded.transform,
+                confidence = excluded.confidence,
+                status = excluded.status,
+                evidence = excluded.evidence,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload.get("from_entity_id"),
+                payload["from_semantic_type_id"],
+                payload.get("to_entity_id"),
+                payload["to_semantic_type_id"],
+                payload.get("relation", "joinable_with"),
+                _jsonb(payload.get("transform", {})),
+                payload.get("confidence"),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("evidence", {})),
+            ),
+        )
+
+    def _apply_planning_example(self, conn: Any, payload: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            insert into sp_planning_examples(id, question, expected_capability_ids,
+                                             expected_operation_ids, expected_variant_ids,
+                                             expected_arguments, expected_graph, tags,
+                                             source, status, provenance, updated_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            on conflict (id) do update set
+                question = excluded.question,
+                expected_capability_ids = excluded.expected_capability_ids,
+                expected_operation_ids = excluded.expected_operation_ids,
+                expected_variant_ids = excluded.expected_variant_ids,
+                expected_arguments = excluded.expected_arguments,
+                expected_graph = excluded.expected_graph,
+                tags = excluded.tags,
+                source = excluded.source,
+                status = excluded.status,
+                provenance = excluded.provenance,
+                updated_at = now()
+            """,
+            (
+                payload["id"],
+                payload["question"],
+                payload.get("expected_capability_ids", []),
+                payload.get("expected_operation_ids", []),
+                payload.get("expected_variant_ids", []),
+                _jsonb(payload.get("expected_arguments", {})),
+                _jsonb(payload.get("expected_graph", {})),
+                payload.get("tags", []),
+                payload.get("source"),
+                _applied_status(payload.get("status") or "active"),
+                _jsonb(payload.get("provenance", {})),
+            ),
+        )
+
     def _insert_lineage(
         self,
         conn: Any,
@@ -2068,6 +2538,37 @@ def _rows_by_id(rows: list[dict[str, Any]], key: str = "id") -> dict[str, dict[s
     return {str(row[key]): dict(row) for row in rows}
 
 
+def _semantic_catalog_tables() -> list[str]:
+    return [
+        "sp_proposal_items",
+        "sp_proposals",
+        "sp_catalog_lineage",
+        "sp_endpoint_checks",
+        "sp_planner_feedback",
+        "sp_execution_graphs",
+        "sp_capability_document_vectors",
+        "sp_capability_documents",
+        "sp_capability_implementations",
+        "sp_field_mappings",
+        "sp_operation_variants",
+        "sp_operation_contracts",
+        "sp_capability_dependencies",
+        "sp_capability_entity_links",
+        "sp_planning_examples",
+        "sp_semantic_join_rules",
+        "sp_entity_identifiers",
+        "sp_entities",
+        "sp_capabilities",
+        "sp_semantic_types",
+        "sp_operation_fields",
+        "sp_operations",
+        "sp_resources",
+        "sp_source_evidence_snapshots",
+        "sp_source_chunks",
+        "sp_source_documents",
+    ]
+
+
 def _catalog_section_specs() -> dict[str, dict[str, Any]]:
     return {
         "semantic_types": {
@@ -2077,12 +2578,40 @@ def _catalog_section_specs() -> dict[str, dict[str, Any]]:
             "where": ["s.status in ('active', 'approved')"],
             "order_by": "s.id",
         },
+        "entities": {
+            "table": "sp_entities",
+            "alias": "e",
+            "key": "id",
+            "where": ["e.status in ('active', 'approved')"],
+            "order_by": "e.id",
+        },
+        "entity_identifiers": {
+            "table": "sp_entity_identifiers",
+            "alias": "i",
+            "key": "id",
+            "where": ["i.status in ('active', 'approved')"],
+            "order_by": "i.entity_id, i.semantic_type_id",
+        },
         "capabilities": {
             "table": "sp_capabilities",
             "alias": "c",
             "key": "id",
             "where": ["c.status in ('active', 'approved')"],
             "order_by": "c.id",
+        },
+        "capability_entity_links": {
+            "table": "sp_capability_entity_links",
+            "alias": "l",
+            "key": "id",
+            "where": ["l.status in ('active', 'approved')"],
+            "order_by": "l.capability_id, l.role, l.entity_id",
+        },
+        "capability_dependencies": {
+            "table": "sp_capability_dependencies",
+            "alias": "d",
+            "key": "id",
+            "where": ["d.status in ('active', 'approved')"],
+            "order_by": "d.capability_id, d.dependency_type, d.depends_on_capability_id",
         },
         "capability_documents": {
             "table": "sp_capability_documents",
@@ -2139,6 +2668,20 @@ def _catalog_section_specs() -> dict[str, dict[str, Any]]:
             "key": "id",
             "where": ["i.status in ('active', 'approved')"],
             "order_by": "i.capability_id, i.operation_id, i.variant_id",
+        },
+        "semantic_join_rules": {
+            "table": "sp_semantic_join_rules",
+            "alias": "j",
+            "key": "id",
+            "where": ["j.status in ('active', 'approved')"],
+            "order_by": "j.id",
+        },
+        "planning_examples": {
+            "table": "sp_planning_examples",
+            "alias": "p",
+            "key": "id",
+            "where": ["p.status in ('active', 'approved')"],
+            "order_by": "p.updated_at desc, p.id",
         },
     }
 
