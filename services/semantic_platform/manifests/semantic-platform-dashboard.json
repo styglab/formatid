@@ -1,6 +1,6 @@
 {
   "service_name": "semantic-platform-dashboard",
-  "dockerfile": "services/semantic_platform/dashboard/infra/image/Dockerfile",
+  "dockerfile": "services/semantic_platform/adapters/dashboard/infra/image/Dockerfile",
   "build_context": "../..",
   "restart": "unless-stopped",
   "ports": [

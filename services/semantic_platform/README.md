@@ -10,6 +10,45 @@ evidence, endpoint metadata, field evidence, proposals, approved semantic
 catalog objects, capability retrieval metadata, and LLM execution planning.
 Provider HTTP execution remains in `apps/pubdata_mcp`.
 
+## Source Layout
+
+`semantic_platform` is one control-plane boundary. Runnable adapters and
+internal libraries are separated:
+
+```text
+services/semantic_platform/
+  adapters/
+    api/        HTTP API adapter
+    dashboard/  browser UI adapter
+    worker/     Prefect/manual background adapter
+  lib/
+    ingestion/  source document -> evidence/proposal/apply graph
+    planner/    question -> semantic execution plan
+    context/    planner/MCP runtime context packaging
+    storage/    Postgres catalog repository
+  manifests/    compose/catalog service declarations
+```
+
+`adapters/*` may expose processes and transports. Shared semantic intelligence,
+catalog mutation, graph orchestration, planning, and repository code belong in
+`lib/*`.
+
+## Local Development
+
+Install semantic platform test/import dependencies before running local unit
+tests. Use a virtual environment; system Python may reject direct `pip install`
+in PEP 668 managed environments.
+
+```bash
+python3 -m venv .venv/semantic_platform
+.venv/semantic_platform/bin/python -m pip install -r services/semantic_platform/requirements-dev.txt
+.venv/semantic_platform/bin/python -m unittest discover -s tests/semantic_platform
+```
+
+The Docker API/worker images use their own runtime requirements under
+`adapters/*/infra/image/requirements.txt`; keep shared package pins such as
+`langgraph` aligned with `requirements-dev.txt`.
+
 The product is not a public API wrapper. The target architecture is:
 
 ```text
@@ -199,22 +238,64 @@ can be added later if needed.
 Desired ingestion shape:
 
 ```text
-read_source
+read_source                         # ingestion/source_loader.py
   -> extract_text
   -> extract_blocks
   -> detect_api_sections
   -> extract_structured_evidence
-  -> verify_endpoint_candidates
   -> load_catalog_context
+  -> verify_endpoint_candidates      # ingestion/endpoint_probe.py
   -> llm_propose_capability_catalog
   -> llm_propose_execution_catalog
-  -> verify_execution_variants
+  -> verify_execution_variants       # ingestion/endpoint_probe.py
   -> build_review_proposal
   -> apply/reject
   -> build_capability_documents
   -> embed_capabilities
   -> upsert_vector_index
 ```
+
+## Internal Layout
+
+```text
+services/semantic_platform/
+  adapters/
+    api/        HTTP API boundary
+    dashboard/  catalog/planner UI
+    worker/     manual/background ingestion runner
+  lib/
+    ingestion/  source document -> evidence -> proposal -> apply
+    planner/    question -> semantic execution plan
+    context/    planner/MCP runtime context helpers
+    storage/    Postgres schema and repository
+  manifests/    compose/catalog service declarations
+```
+
+`ingestion/graph.py` should remain orchestration-focused. Keep large concerns
+in smaller modules:
+
+- `ingestion/state.py`: graph state and ingestion/prompt version constants
+- `ingestion/graph.py`: LangGraph-style graph definition and CLI compatibility wrapper
+- `ingestion/graph_runtime.py`: LangGraph-backed `StateGraph`/`add_node`/`add_edge`/`compile` wrapper
+- `ingestion/runner.py`: graph execution, repository writes, apply, capability docs, embeddings
+- `ingestion/evidence_snapshot.py`: evidence snapshot payload and file writing
+- `ingestion/nodes/`: graph node entrypoints, each taking and returning `SourceGraphState`
+- `ingestion/nodes/source.py`: source loading node
+- `ingestion/nodes/evidence.py`: text/block/API-section/evidence nodes
+- `ingestion/nodes/catalog_context.py`: ingestion-time catalog context packaging node
+- `ingestion/nodes/endpoint.py`: endpoint/variant verification node exports
+- `ingestion/nodes/llm_proposal.py`: LLM capability/execution proposal node entrypoints
+- `ingestion/nodes/proposal.py`: proposal filtering/building node entrypoints
+- `ingestion/llm/proposal.py`: LLM call, LLM context packaging, operation variant candidates
+- `ingestion/llm/validation.py`: LLM response and execution-contract validation
+- `ingestion/proposal/builder.py`: proposal envelope, capability closure, proposal item generation
+- `ingestion/source_loader.py`: source bytes, sha256, source id, manifest and sidecar metadata
+- `ingestion/endpoint_probe.py`: evidence-time endpoint probing and safe variant verification
+- `ingestion/evidence.py`, `extraction.py`, `chunking.py`: document evidence extraction
+
+Do not add provider execution runtime behavior to ingestion. Endpoint probing is
+only evidence collection for proposal quality; durable provider execution,
+pagination, retry, and response normalization belong in `apps/pubdata_mcp`.
 
 Ingestion LLM output should propose both semantic meaning and executable
 contracts. It should identify request field rules such as required fields,
@@ -335,13 +416,13 @@ apps/pubdata_mcp           = imperative provider execution runtime
 Keep `services/semantic_platform` split by responsibility:
 
 ```text
-api/        HTTP boundary only: catalog/proposal/planner endpoints
-dashboard/  browser UI only: consumes API data
-ingestion/  source documents -> evidence -> proposals -> optional apply
-planner/    user question + retrieved catalog context -> execution plan
-runtime/    planner/runtime context packaging helpers
-storage/    Postgres schema, repository, catalog persistence
-worker/     optional Prefect background/manual ingestion runner
+adapters/api        HTTP boundary only: catalog/proposal/planner endpoints
+adapters/dashboard  browser UI only: consumes API data
+adapters/worker     optional Prefect background/manual ingestion runner
+lib/ingestion       source documents -> evidence -> proposals -> optional apply
+lib/planner         user question + retrieved catalog context -> execution plan
+lib/context         planner/MCP runtime context packaging helpers
+lib/storage         Postgres schema, repository, catalog persistence
 ```
 
 Rules:
@@ -514,14 +595,14 @@ capability proposal or auto-apply.
 Run one source:
 
 ```bash
-python3 -m services.semantic_platform.ingestion.graph \
+python3 -m services.semantic_platform.lib.ingestion.graph \
   --source sources/국세청_사업자등록정보\ 진위확인\ 및\ 상태조회\ 서비스.md
 ```
 
 Apply directly only for controlled runs:
 
 ```bash
-python3 -m services.semantic_platform.ingestion.graph \
+python3 -m services.semantic_platform.lib.ingestion.graph \
   --source sources/some_api_spec.docx \
   --apply
 ```
@@ -530,7 +611,7 @@ python3 -m services.semantic_platform.ingestion.graph \
 LLM response, pass it explicitly:
 
 ```bash
-LLM_MODE=codex_manual python3 -m services.semantic_platform.ingestion.graph \
+LLM_MODE=codex_manual python3 -m services.semantic_platform.lib.ingestion.graph \
   --source sources/some_api_spec.docx \
   --manual-llm-response /tmp/source_llm_response.json
 ```

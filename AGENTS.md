@@ -44,6 +44,15 @@ Current semantic platform service:
 
 - `services/semantic_platform`
 
+Semantic platform source layout:
+
+- `services/semantic_platform/adapters/*`: runnable adapters only
+  (`api`, `dashboard`, `worker`)
+- `services/semantic_platform/lib/*`: internal semantic platform libraries
+  (`ingestion`, `planner`, `context`, `storage`)
+- `services/semantic_platform/manifests/*`: compose/catalog service
+  declarations for the semantic platform boundary
+
 ### apps/
 
 Apps own orchestration, business rules, persistence, ontology, semantic transformers, MCP/RAG/domain APIs, and app-specific pipeline workers.
@@ -254,8 +263,8 @@ execution planning, and any future LLM-assisted planning path.
 - Domain logic belongs in `apps/*`.
 - Generic service/runtime logic belongs in `services/*` or `core/*`.
 - App ontology, relationship names, semantic tags, and semantic document builders belong in `apps/<app>/app/semantic`.
-- Semantic planning belongs in `services/semantic_platform`; provider execution belongs in `apps/pubdata_mcp`.
-- `services/semantic_platform/worker` owns manual/background ingestion jobs and Prefect manual deployments. Do not add schedules until explicitly requested.
+- Semantic planning belongs in `services/semantic_platform/lib/planner`; provider execution belongs in `apps/pubdata_mcp`.
+- `services/semantic_platform/adapters/worker` owns manual/background ingestion jobs and Prefect manual deployments. Do not add schedules until explicitly requested.
 - Prefect control plane manifests live in `services/prefect`; app-specific Prefect workers live under `apps/<app>`.
 - Compose is generated from manifests. Do not hand-edit `deploy/compose/docker-compose.yml` except to inspect generated output.
 - Secret values must stay in env files, not manifests or payloads.

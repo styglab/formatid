@@ -1,5 +1,9 @@
 # Semantic Platform 한글 매뉴얼
 
+관련 문서:
+
+- [Semantic Platform Dashboard 설계](./semantic_platform_dashboard_ko.md)
+
 ## 목적
 
 `services/semantic_platform`는 공공 API 명세를 읽어서 의미 기반 catalog를 만들고, 사용자의 질문을 실행 가능한 semantic execution DAG로 계획하는 서비스다.
@@ -242,7 +246,7 @@ ingestion graph는 공공 API 명세 파일을 읽어서 review 가능한 propos
 현재 표준 구현 모듈은 다음이다.
 
 ```text
-services.semantic_platform.ingestion.graph
+services.semantic_platform.lib.ingestion.graph
 ```
 
 전체 노드 흐름은 다음과 같다.

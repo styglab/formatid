@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from services.semantic_platform.storage.repository import _catalog_section_specs
+from services.semantic_platform.lib.storage.repository import _catalog_section_specs
 
 
 class CatalogPaginationTests(unittest.TestCase):

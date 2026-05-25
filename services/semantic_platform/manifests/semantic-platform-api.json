@@ -1,12 +1,12 @@
 {
   "service_name": "semantic-platform-api",
   "service_type": "api",
-  "dockerfile": "services/semantic_platform/api/infra/image/Dockerfile",
+  "dockerfile": "services/semantic_platform/adapters/api/infra/image/Dockerfile",
   "build_context": "../..",
   "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
   "restart": "unless-stopped",
   "env_files": [
-    "services/semantic_platform/api/infra/env/app.env"
+    "services/semantic_platform/adapters/api/infra/env/app.env"
   ],
   "ports": [
     "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_API_HOST_PORT:-8016}:8000"

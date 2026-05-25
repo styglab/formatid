@@ -4,12 +4,9 @@ import json
 import os
 import unittest
 
-from services.semantic_platform.ingestion.graph import (
-    _contract_fields,
-    _provider_status,
-    _validate_llm_analysis,
-    _with_auth,
-)
+from services.semantic_platform.lib.ingestion.endpoint_probe import _provider_status, _with_auth
+from services.semantic_platform.lib.ingestion.graph import _validate_llm_analysis
+from services.semantic_platform.lib.ingestion.llm.proposal import _contract_fields
 
 
 class IngestionContractSchemaTests(unittest.TestCase):

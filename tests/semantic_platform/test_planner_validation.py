@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from services.semantic_platform.planner.service import validate_plan
+from services.semantic_platform.lib.planner.service import validate_plan
 
 
 class PlannerValidationTests(unittest.TestCase):

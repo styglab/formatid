@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from services.semantic_platform.ingestion.graph import _capability_catalog_closure, _operation_variant_candidates
-from services.semantic_platform.storage.repository import _capability_document_from_capability
+from services.semantic_platform.lib.ingestion.llm.proposal import operation_variant_candidates
+from services.semantic_platform.lib.ingestion.proposal.builder import _capability_catalog_closure
+from services.semantic_platform.lib.storage.repository import _capability_document_from_capability
 
 
 class CapabilityClosureTests(unittest.TestCase):
@@ -126,7 +127,7 @@ class CapabilityClosureTests(unittest.TestCase):
             },
         }
 
-        candidates = _operation_variant_candidates(state)
+        candidates = operation_variant_candidates(state)
 
         self.assertEqual(1, len(candidates))
         self.assertEqual("getContracts", candidates[0]["operation_name"])

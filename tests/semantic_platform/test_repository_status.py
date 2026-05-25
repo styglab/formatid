@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from services.semantic_platform.storage.repository import _applied_status
+from services.semantic_platform.lib.storage.repository import _applied_status
 
 
 class RepositoryStatusTests(unittest.TestCase):

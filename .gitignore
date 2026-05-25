@@ -28,6 +28,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!services/semantic_platform/lib/
+!services/semantic_platform/lib/**
 lib64/
 parts/
 sdist/

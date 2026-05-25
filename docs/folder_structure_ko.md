@@ -114,25 +114,67 @@ provider 실행은 `apps/pubdata_mcp`가 담당한다.
 내부 경계는 다음처럼 고정한다.
 
 ```text
-api/        HTTP API 경계만 담당
-dashboard/  UI만 담당
-ingestion/  source document -> evidence/proposal/apply
-planner/    question -> semantic execution plan
-runtime/    planner/runtime context helper
-storage/    Postgres schema/repository
-worker/     optional Prefect background/manual runner
+adapters/
+  api/        HTTP API adapter
+  dashboard/  UI adapter
+  worker/     optional Prefect background/manual adapter
+lib/
+  ingestion/  source document -> evidence/proposal/apply
+  planner/    question -> semantic execution plan
+  context/    planner/MCP runtime context helper
+  storage/    Postgres schema/repository
+manifests/    compose/catalog service declarations
 ```
+
+`adapters/*`는 실제 프로세스와 transport 경계만 담당한다. `lib/*`는
+semantic platform 내부 라이브러리이며 ingestion graph, planner,
+repository, runtime context처럼 여러 실행 표면에서 공유되는 코드를 둔다.
+
+`adapters/api/app/main.py`는 FastAPI route와 HTTP 관심사만 둔다.
+`adapters/api/app/gateway.py`는 route에서 `lib/storage`, `lib/planner`,
+`lib/context`로 들어가는 얇은 gateway다. 도메인 모델이나 semantic
+추론은 gateway에 두지 않는다.
+
+`lib/ingestion/` 내부는 다음 역할로 나눈다.
+
+```text
+lib/ingestion/graph.py             LangGraph graph 정의와 CLI compatibility wrapper
+lib/ingestion/graph_runtime.py     LangGraph 기반 StateGraph/add_node/add_edge/compile wrapper
+lib/ingestion/runner.py            graph 실행, repository 저장, apply, capability docs, embedding
+lib/ingestion/evidence_snapshot.py evidence snapshot payload와 파일 저장
+lib/ingestion/state.py             graph state와 ingestion/prompt version
+lib/ingestion/nodes/               graph에 연결되는 노드 entrypoint
+lib/ingestion/nodes/source.py      source loading 노드
+lib/ingestion/nodes/evidence.py    text/block/API section/evidence 노드
+lib/ingestion/nodes/catalog_context.py catalog context packaging 노드
+lib/ingestion/nodes/endpoint.py    endpoint/variant verification 노드 export
+lib/ingestion/nodes/llm_proposal.py LLM capability/execution proposal 노드 entrypoint
+lib/ingestion/nodes/proposal.py    proposal filtering/building 노드 entrypoint
+lib/ingestion/llm/proposal.py     LLM 호출, LLM context packaging, operation variant candidates
+lib/ingestion/llm/validation.py   LLM 응답과 execution contract schema 검증
+lib/ingestion/proposal/builder.py proposal envelope, capability closure, proposal item 생성
+lib/ingestion/source_loader.py     원천 파일 bytes, sha256, source id, manifest/sidecar metadata
+lib/ingestion/endpoint_probe.py    evidence 수집용 endpoint probe와 안전한 variant verification
+lib/ingestion/evidence.py          문서 블록에서 API section/field/example evidence 추출
+lib/ingestion/extraction.py        파일 텍스트 추출
+lib/ingestion/chunking.py          chunk helper
+```
+
+`graph.py`는 orchestration만 남기는 방향으로 유지한다. graph에 직접
+연결되는 함수는 `nodes/` 아래에 두고, source 식별, endpoint probe, LLM
+response validation, proposal closure 같은 큰 관심사를 다시 `graph.py`에
+직접 늘리지 않는다.
 
 경계 규칙:
 
-- `api/`는 세부 catalog mutation을 직접 구현하지 않고 repository/domain
+- `adapters/api/`는 세부 catalog mutation을 직접 구현하지 않고 repository/domain
   API를 호출한다.
-- `dashboard/`는 provider/domain routing 규칙을 갖지 않는다.
-- `ingestion/`은 evidence 수집을 위한 endpoint probe는 할 수 있지만,
+- `adapters/dashboard/`는 provider/domain routing 규칙을 갖지 않는다.
+- `lib/ingestion/`은 evidence 수집을 위한 endpoint probe는 할 수 있지만,
   provider execution runtime이 되면 안 된다.
-- `planner/`는 provider API를 호출하지 않는다.
-- `storage/`는 semantic/domain 추론을 하지 않는다.
-- `worker/`는 ingestion을 감싸는 optional runner이며 별도 ingestion
+- `lib/planner/`는 provider API를 호출하지 않는다.
+- `lib/storage/`는 semantic/domain 추론을 하지 않는다.
+- `adapters/worker/`는 ingestion을 감싸는 optional runner이며 별도 ingestion
   구현을 갖지 않는다.
 
 ## core/

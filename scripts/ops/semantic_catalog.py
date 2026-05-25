@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from services.semantic_platform.storage.repository import SemanticCatalogRepository
+from services.semantic_platform.lib.storage.repository import SemanticCatalogRepository
 from scripts.ops.common import run_command
 
 
@@ -20,7 +20,7 @@ def reset_semantic_catalog() -> dict:
             "python",
             "-c",
             (
-                "from services.semantic_platform.storage.repository import SemanticCatalogRepository; "
+                "from services.semantic_platform.lib.storage.repository import SemanticCatalogRepository; "
                 "import json; "
                 "print(json.dumps(SemanticCatalogRepository().reset_catalog(), ensure_ascii=False))"
             ),
