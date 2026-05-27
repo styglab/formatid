@@ -47,7 +47,7 @@ Current semantic platform service:
 Semantic platform source layout:
 
 - `services/semantic_platform/adapters/*`: runnable adapters only
-  (`api`, `dashboard`, `worker`)
+  (`admin_api`, `planner_api`, `dashboard`, `worker`)
 - `services/semantic_platform/lib/*`: internal semantic platform libraries
   (`ingestion`, `planner`, `context`, `storage`)
 - `services/semantic_platform/manifests/*`: compose/catalog service
@@ -128,12 +128,21 @@ Planner and executor contract:
 ```text
 Client question
   -> pubdata_mcp
-  -> services/semantic_platform LLM execution planner
+  -> services/semantic_platform/adapters/planner_api LLM execution planner
   -> semantic execution plan
   -> pubdata_mcp operation executor
   -> provider APIs
   -> semantic normalization / integration / answer
 ```
+
+Semantic platform API services are split by plane:
+
+- `semantic-platform-api`: admin/control plane for dashboard, source upload,
+  ingestion, proposals, catalog governance, and run tracking.
+- `semantic-platform-planner-api`: runtime plane for MCP/executor clients. It
+  exposes approved catalog/contract reads, capability retrieval, endpoint check
+  records, runtime context, and execution planning. It must not expose source
+  upload, secret CRUD, ingestion, proposal review, or catalog mutation.
 
 `services/semantic_platform` may include operation metadata in a plan:
 
@@ -270,6 +279,17 @@ execution planning, and any future LLM-assisted planning path.
 - Secret values must stay in env files, not manifests or payloads.
 - Retired code belongs under `tmp/retired_apps` or `tmp/retired_core` and must
   not be imported by active runtime paths.
+- `tmp/*` is a scratch/working area. Codex must not ask for confirmation before
+  creating, updating, validating, copying, or deleting non-secret temporary
+  artifacts there. This explicitly includes codex_manual LLM payloads, generated
+  request/response JSON, one-off inspection files, transient validation output,
+  and other disposable work files. Do the work directly and clean it up when it
+  is no longer useful. Do not put secret values in `tmp/*`.
+- When validating `tmp/*` artifacts, prefer already-approved commands without
+  shell redirection, command substitution, pipes, or heredocs. For example, run
+  `python3 -m json.tool tmp/path/payload.json` directly and read the tool output
+  instead of redirecting to `/tmp/*.out`, because redirection can trigger a
+  sandbox approval prompt even for otherwise approved validation commands.
 
 ## Recommended App Structure
 

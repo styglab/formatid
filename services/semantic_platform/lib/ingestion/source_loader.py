@@ -44,6 +44,9 @@ def read_source(state: SourceGraphState) -> SourceGraphState:
 
 
 def _source_document_id(source: Path, sha256: str, metadata: dict[str, Any]) -> str:
+    source_id = str(metadata.get("source_id") or "").strip()
+    if source_id:
+        return source_id
     provider = _slug_optional(metadata.get("provider"))
     source_key = _slug_optional(metadata.get("source_key") or metadata.get("key"))
     version = _slug_optional(metadata.get("version"))

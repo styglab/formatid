@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from services.semantic_platform.lib.ingestion.llm.validation import (
     contract_path_list as _contract_path_list,
@@ -17,7 +17,6 @@ from services.semantic_platform.lib.ingestion.nodes import (
     extract_structured_evidence_node,
     extract_text_node,
     build_review_proposal,
-    keep_passed_verified_capabilities,
     load_catalog_context,
     llm_propose_capability_catalog,
     llm_propose_execution_catalog,
@@ -35,6 +34,7 @@ def run_source_ingestion(
     manual_llm_response: dict[str, Any] | None = None,
     apply: bool = False,
     force: bool = False,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     return _run_source_ingestion(
         source_path,
@@ -42,6 +42,7 @@ def run_source_ingestion(
         manual_llm_response=manual_llm_response,
         apply=apply,
         force=force,
+        progress_callback=progress_callback,
     )
 
 
@@ -57,7 +58,6 @@ def build_source_ingestion_graph():
     graph.add_node("llm_propose_capability_catalog", llm_propose_capability_catalog)
     graph.add_node("llm_propose_execution_catalog", llm_propose_execution_catalog)
     graph.add_node("verify_capabilities", verify_capabilities)
-    graph.add_node("keep_passed_verified_capabilities", keep_passed_verified_capabilities)
     graph.add_node("build_review_proposal", build_review_proposal)
 
     graph.add_edge(START, "read_source")
@@ -66,12 +66,11 @@ def build_source_ingestion_graph():
     graph.add_edge("extract_blocks", "detect_api_sections")
     graph.add_edge("detect_api_sections", "extract_structured_evidence")
     graph.add_edge("extract_structured_evidence", "load_catalog_context")
-    graph.add_edge("load_catalog_context", "verify_endpoint_candidates")
-    graph.add_edge("verify_endpoint_candidates", "llm_propose_capability_catalog")
+    graph.add_edge("load_catalog_context", "llm_propose_capability_catalog")
     graph.add_edge("llm_propose_capability_catalog", "llm_propose_execution_catalog")
-    graph.add_edge("llm_propose_execution_catalog", "verify_capabilities")
-    graph.add_edge("verify_capabilities", "keep_passed_verified_capabilities")
-    graph.add_edge("keep_passed_verified_capabilities", "build_review_proposal")
+    graph.add_edge("llm_propose_execution_catalog", "verify_endpoint_candidates")
+    graph.add_edge("verify_endpoint_candidates", "verify_capabilities")
+    graph.add_edge("verify_capabilities", "build_review_proposal")
     graph.add_edge("build_review_proposal", END)
     return graph.compile()
 
@@ -80,15 +79,30 @@ SOURCE_INGESTION_GRAPH = build_source_ingestion_graph()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest public API specification into semantic_platform Postgres catalog.")
+    parser = argparse.ArgumentParser(description="Ingest public API specification through the semantic_platform API.")
     parser.add_argument("--source", required=True)
     parser.add_argument("--manual-llm-response", default=None)
+    parser.add_argument("--llm-secret-ref", default=None)
+    parser.add_argument("--llm-mode", default=None)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--api-url", default=None)
+    parser.add_argument("--no-wait", action="store_true")
     args = parser.parse_args()
+    from services.semantic_platform.lib.ingestion.api_client import upload_and_ingest_source
+
     manual = _load_manual(args.manual_llm_response)
-    result = run_source_ingestion(args.source, manual_llm_response=manual, apply=args.apply, force=args.force)
-    print(json.dumps(_ingestion_result_summary(result), ensure_ascii=False, indent=2, default=str))
+    result = upload_and_ingest_source(
+        args.source,
+        commit_mode="direct_apply" if args.apply else "proposal",
+        manual_llm_response=manual,
+        llm_secret_ref=args.llm_secret_ref,
+        llm_mode=args.llm_mode,
+        force=args.force,
+        wait=not args.no_wait,
+        api_url=args.api_url,
+    )
+    print(json.dumps(_api_ingestion_result_summary(result), ensure_ascii=False, indent=2, default=str))
 
 
 def _ingestion_result_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -119,6 +133,20 @@ def _ingestion_result_summary(result: dict[str, Any]) -> dict[str, Any]:
             "embedding_provider": embedding_result.get("embedding_provider"),
             "vector_status": embedding_result.get("vector_status"),
         } if embedding_result else None,
+    }
+
+
+def _api_ingestion_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    run = result.get("ingestion_run") if isinstance(result.get("ingestion_run"), dict) else {}
+    payload = result.get("result") if isinstance(result.get("result"), dict) else {}
+    return {
+        "run_id": result.get("run_id"),
+        "status": result.get("status"),
+        "source_id": (result.get("source") or {}).get("id") if isinstance(result.get("source"), dict) else None,
+        "revision_id": (result.get("revision") or {}).get("id") if isinstance(result.get("revision"), dict) else None,
+        "current_step": run.get("current_step"),
+        "error_message": result.get("error_message"),
+        "result": _ingestion_result_summary(payload) if payload else {},
     }
 
 

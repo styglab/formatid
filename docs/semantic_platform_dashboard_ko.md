@@ -41,6 +41,7 @@ Catalog
 Proposals
 Ingestion Runs
 Secrets
+Versions
 Planner Tests
 ```
 
@@ -62,6 +63,7 @@ source 선택 실행
 bulk ingestion 실행
 evidence / proposal / catalog lineage 보기
 purge preview
+Codex manual batch prompt 생성
 ```
 
 테이블 컬럼:
@@ -69,7 +71,6 @@ purge preview
 ```text
 checkbox
 provider
-source_key
 title
 file_name
 source_status
@@ -85,6 +86,13 @@ embedding_status
 last_run_at
 actions
 ```
+
+여러 source를 선택한 뒤 Codex에게 넘길 batch prompt를 생성할 수 있어야
+한다. 이 prompt는 source별 최신 revision, secret refs, `commit_mode:
+proposal`, apply 금지, `tmp/*` 임시 파일 사용 허용, source별 ingestion run
+분리, proposal 생성까지만 수행하라는 운영 규칙을 포함한다. 여러 문서를
+하나의 proposal로 합치지 않고 source별 run과 capability-scoped proposal을
+남기는 것이 기본이다.
 
 `catalog_status` 추천 값:
 
@@ -166,38 +174,37 @@ proposal.<source_document_id>.<capability_id>.review
 
 실행 상태와 로그를 보는 화면이다.
 
-현재 구조에서는 Prefect를 execution tracking의 source of truth로 사용한다.
-Semantic Platform DB는 source/catalog/proposal/evidence lineage를 가진다.
+현재 구현에서는 Semantic Platform API가 ingestion 실행 경계이며
+`sp_ingestion_runs`가 대시보드의 실행 추적 source of truth다. Prefect worker는
+선택적 실행 표면이고, 직접 graph를 호출해 run tracking을 우회하면 안 된다.
 
 역할 분리:
 
 ```text
-Prefect
-  -> flow_run_id
-  -> status
-  -> started_at / finished_at
-  -> task state
-  -> logs
-  -> retry / failure
-
 Semantic Platform DB
+  -> ingestion_run_id
+  -> status
+  -> current_step
+  -> started_at / finished_at
+  -> request / result / error_message
+
+Source/Catalog lineage
   -> source_id
   -> source sha256
   -> proposal_ids
   -> evidence_snapshot_id
   -> catalog impact summary
   -> embedding result
-  -> prefect_flow_run_id link
 ```
 
-처음에는 source별 flow run을 생성하고, 여러 source 실행은 run group으로
-묶는다.
+처음에는 source별 ingestion run을 생성하고, 여러 source 실행은 batch/group
+summary로 묶어 본다.
 
 ```text
 run_group_id
-  -> source A flow_run_id
-  -> source B flow_run_id
-  -> source C flow_run_id
+  -> source A ingestion_run_id
+  -> source B ingestion_run_id
+  -> source C ingestion_run_id
 ```
 
 이 방식의 장점:
@@ -222,6 +229,23 @@ secret 값은 저장/수정 시에만 입력 가능
 조회 API는 masked metadata만 반환
 evidence/proposal/log에는 secret redaction 필수
 ```
+
+대시보드 입력 기준:
+
+```text
+Secrets 화면
+  Secret ID: secret.data_go_kr.service_key
+  Provider: data_go_kr
+  Name: service_key
+  Secret Value: 실제 키 값. 저장 시에만 입력하고 조회 응답에는 반환하지 않는다.
+
+Sources 업로드 화면
+  Secret IDs: secret.data_go_kr.service_key
+  Auth Params: serviceKey
+```
+
+즉 source 문서는 secret 값을 직접 갖지 않는다. source는 어떤 secret을 어떤
+인증 파라미터에 연결할지만 보관한다.
 
 예:
 
@@ -248,6 +272,45 @@ global env fallback
 Env only 방식은 컨테이너 restart가 필요하다. Dashboard에서 운영형 secret
 관리를 하려면 API/DB 기반 secret store가 필요하다.
 
+### Versions
+
+Catalog version 화면은 승인된 선언형 catalog snapshot을 다룬다. 현재
+dashboard에서 보이는 기본 catalog는 active/current 버전 기준이다.
+
+주요 기능:
+
+```text
+version list
+version detail
+diff summary
+read-only snapshot view
+Back to Current
+Download JSON
+Restore
+```
+
+snapshot 범위는 `approved_declarative_catalog_v1`이다. 포함 대상은 semantic
+types, entities, capabilities, resources, operations, operation fields,
+operation contracts, operation variants, field mappings, capability
+implementations, join rules, dependencies, planning examples다.
+
+제외 대상:
+
+```text
+capability_documents
+capability_document_vectors
+endpoint_checks
+proposals
+source_documents / revisions / evidence snapshots
+ingestion_runs
+planner feedback / execution graphs
+secrets
+```
+
+Restore는 선택한 snapshot으로 현재 catalog 선언 테이블을 맞춘 뒤 새 active
+version을 만든다. 기존 version row를 수정하거나 삭제하지 않는다. 새 version
+metadata에는 `restored_from_version_id`가 남는다.
+
 ### Planner Tests
 
 질문이 capability retrieval과 planner에서 어떻게 처리되는지 확인하는
@@ -270,9 +333,10 @@ planner output JSON
 
 ## Source Registry
 
-Source Registry는 운영 관리의 기준이다. `sources/manifest.json`은 초기
-bootstrap/import 용도로 남길 수 있지만, 대시보드 운영은 DB 기반 registry가
-기준이 되어야 한다.
+Source Registry는 운영 관리의 기준이다. 루트 `sources/manifest.json`이나
+루트 `sources/` 폴더는 운영 기준으로 사용하지 않는다. 초기 bootstrap/import가
+필요하면 대시보드/API 업로드 또는 worker의 명시적 import 경로를 사용하고,
+DB 기반 registry를 기준으로 삼는다.
 
 추천 필드:
 
@@ -280,7 +344,6 @@ bootstrap/import 용도로 남길 수 있지만, 대시보드 운영은 DB 기�
 source_id
 provider
 provider_name_ko
-source_key
 title
 file_path
 file_name
@@ -289,7 +352,7 @@ status
 auth_secret_refs
 auth_parameter_names
 last_ingested_sha256
-last_prefect_flow_run_id
+last_ingestion_run_id
 created_at
 updated_at
 ```
@@ -304,14 +367,22 @@ deprecated
 blocked
 ```
 
-파일 저장 위치:
+파일 저장 위치는 로컬 폴더가 아니라 object key로 관리한다:
 
 ```text
-sources/raw/<provider>/<source_key>/<original_filename>
+raw/<provider>/<source_id>/revisions/<revision_number>/<original_filename>
 ```
 
-SHA는 사람용 경로에 쓰지 않는다. SHA는 변경 감지와 lineage metadata에만
-사용한다.
+Object storage를 사용할 때는 로컬 `sources/` 폴더가 아니라 S3/MinIO
+object key가 기준이 된다.
+
+```text
+s3://semantic-platform-sources/raw/<provider>/<source_id>/revisions/<revision_number>/<original_filename>
+```
+
+영문 `source_key`는 필수로 두지 않는다. `source_id`는 시스템이 생성하는
+불변 ID이고, 사람이 보는 이름은 `title`을 사용한다. SHA는 source revision
+변경 감지와 lineage metadata에만 사용한다.
 
 ## Source 삭제 정책
 
@@ -396,40 +467,66 @@ POST   /sources/{source_id}/purge
 
 ### Ingestion API
 
+대시보드는 semantic platform API를 canonical 실행 경계로 사용한다.
+실제 서비스 모드에서는 API 서비스가 OpenAI 설정을 가진다.
+
+```env
+LLM_MODE=openai
+OPENAI_API_KEY=...
+```
+
+이 경우 대시보드는 manual LLM JSON을 받지 않는다. 사용자는 source를
+선택하고 commit mode만 고른다.
+
 ```http
-POST /ingestion-runs
-GET  /ingestion-runs
-GET  /ingestion-runs/{run_group_id}
-GET  /ingestion-runs/{flow_run_id}/logs
+POST /sources/{source_id}/ingest
+GET  /ingestion/runs
+GET  /ingestion/runs/{run_id}
 ```
 
-`POST /ingestion-runs` 예:
+대시보드 요청 예:
 
 ```json
 {
-  "source_ids": [
-    "source.nts.business_status",
-    "source.pps.g2b_contract_info"
-  ],
-  "apply": false,
+  "revision_id": "source_revision.nts.business_status.001",
+  "commit_mode": "proposal",
   "force": false,
-  "llm_mode": "codex_manual"
+  "requested_by": "dashboard"
 }
 ```
 
-응답 예:
+worker/CLI 개발 흐름에서는 Codex가 LLM 호출부만 대체할 수 있다. 이때는
+API/graph 경계에 `manual_llm_response`를 명시적으로 전달한다.
 
 ```json
 {
-  "run_group_id": "ingestion_group.20260525.001",
-  "runs": [
-    {
-      "source_id": "source.nts.business_status",
-      "prefect_flow_run_id": "..."
-    }
-  ]
+  "revision_id": "source_revision.nts.business_status.001",
+  "commit_mode": "proposal",
+  "force": true,
+  "requested_by": "worker",
+  "llm_mode": "codex_manual",
+  "manual_llm_response": {
+    "resources": [],
+    "operations": [],
+    "semantic_types": [],
+    "entities": [],
+    "entity_identifiers": [],
+    "capabilities": [],
+    "capability_entity_links": [],
+    "capability_dependencies": [],
+    "operation_contracts": [],
+    "operation_variants": [],
+    "field_mappings": [],
+    "semantic_join_rules": [],
+    "planning_examples": [],
+    "capability_implementations": []
+  }
 }
 ```
+
+API는 `manual_llm_response`가 없는 요청을 OpenAI 서비스 모드로만 실행한다.
+즉 `LLM_MODE=disabled` 또는 `codex_manual` 상태에서 수동 응답 없이 실행해
+empty proposal이 생기는 흐름은 막아야 한다.
 
 ### Secret API
 
@@ -448,6 +545,11 @@ DELETE /secrets/{secret_id}
 
 ```http
 GET /catalog/sections/{section}?limit=100&offset=0&q=
+GET /catalog/versions
+GET /catalog/versions/{version_id}
+GET /catalog/versions/{version_id}/diff
+GET /catalog/versions/{version_id}/export
+POST /catalog/versions/{version_id}/restore
 GET /proposals
 GET /proposals/{proposal_id}
 POST /proposals/{proposal_id}/apply

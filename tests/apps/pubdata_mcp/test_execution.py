@@ -21,6 +21,7 @@ from apps.pubdata_mcp.app.common.execution import (
     _result_status,
     _smoke_result,
     _semantic_to_raw_arguments,
+    _split_request_arguments,
     _validate_raw_arguments,
     execute_semantic_plan,
 )
@@ -169,6 +170,56 @@ class PubdataMcpExecutionTests(unittest.TestCase):
         )
 
         self.assertEqual({"phone": "010-2222-3333"}, raw_arguments)
+
+    def test_contract_flat_fields_map_to_raw_arguments(self) -> None:
+        raw_arguments = _semantic_to_raw_arguments(
+            {
+                "registration_datetime_range": {"from": "2025-01-01 00:00", "to": "2025-01-01 23:59"},
+                "response_format": "json",
+            },
+            [],
+            {
+                "request": {
+                    "fields": {
+                        "inqryBgnDate": {
+                            "location": "query",
+                            "semantic_type": "registration_datetime_range",
+                            "transform": "date_start",
+                            "format": "yyyyMMdd",
+                        },
+                        "inqryEndDate": {
+                            "location": "query",
+                            "semantic_type": "registration_datetime_range",
+                            "transform": "date_end",
+                            "format": "yyyyMMdd",
+                        },
+                        "type": {"location": "query", "semantic_type": "response_format"},
+                    },
+                    "defaults": {"pageNo": 1, "numOfRows": 10},
+                }
+            },
+        )
+
+        self.assertEqual("20250101", raw_arguments["inqryBgnDate"])
+        self.assertEqual("20250101", raw_arguments["inqryEndDate"])
+        self.assertEqual("json", raw_arguments["type"])
+        self.assertEqual(1, raw_arguments["pageNo"])
+
+    def test_split_request_arguments_supports_flat_field_locations(self) -> None:
+        query, body = _split_request_arguments(
+            {"q": "one", "payload": {"value": 1}, "extra": "fallback"},
+            {
+                "request": {
+                    "fields": {
+                        "q": {"location": "query"},
+                        "payload": {"location": "body"},
+                    }
+                }
+            },
+        )
+
+        self.assertEqual({"q": "one"}, query)
+        self.assertEqual({"payload": {"value": 1}, "extra": "fallback"}, body)
 
     def test_contract_validation_rejects_pattern_mismatch_before_execution(self) -> None:
         errors = _validate_raw_arguments(

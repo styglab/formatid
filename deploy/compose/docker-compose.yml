@@ -22,6 +22,21 @@ services:
       timeout: 6s
       retries: 20
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    env_file:
+      - ./env/minio.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "${HOST_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    volumes:
+      - ${MINIO_DATA_DIR:-../../data/minio}:/data
+
   nginx:
     build:
       context: ../..
@@ -176,11 +191,12 @@ services:
   semantic-platform-api:
     build:
       context: ../..
-      dockerfile: services/semantic_platform/adapters/api/infra/image/Dockerfile
+      dockerfile: services/semantic_platform/adapters/admin_api/infra/image/Dockerfile
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     restart: unless-stopped
     env_file:
-      - ../../services/semantic_platform/adapters/api/infra/env/app.env
+      - ../../services/semantic_platform/adapters/admin_api/infra/env/app.env
+      - ./env/minio.env
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_API_HOST_PORT:-8016}:8000"
     profiles:
@@ -214,6 +230,28 @@ services:
       timeout: 3s
       retries: 5
 
+  semantic-platform-planner-api:
+    build:
+      context: ../..
+      dockerfile: services/semantic_platform/adapters/planner_api/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ../../services/semantic_platform/adapters/admin_api/infra/env/app.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_PLANNER_API_HOST_PORT:-8017}:8000"
+    profiles:
+      - "semantic_platform"
+      - "pubdata"
+    depends_on:
+      embedding-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   semantic-platform-worker:
     build:
       context: ../..
@@ -223,11 +261,10 @@ services:
     restart: unless-stopped
     env_file:
       - ../../services/semantic_platform/adapters/worker/infra/env/app.env
+      - ./env/minio.env
     profiles:
       - "semantic_platform"
       - "pubdata"
-    volumes:
-      - ../../sources:/app/sources
     depends_on:
       embedding-service:
         condition: service_healthy
@@ -248,7 +285,7 @@ services:
       - "pubdata-mcp"
       - "pubdata"
     depends_on:
-      semantic-platform-api:
+      semantic-platform-planner-api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]

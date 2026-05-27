@@ -168,6 +168,33 @@ recent proposals
 
 runtime planner가 직접 쓰는 tool catalog가 아니라, ingestion LLM이 기존 catalog를 참고하고 중복을 줄이기 위한 context다.
 
+### Catalog Version
+
+catalog version은 승인된 선언형 catalog의 감사/복구용 snapshot이다. version은
+proposal, endpoint check, evidence, ingestion run까지 모두 담는 백업이
+아니다. 포함 범위는 `approved_declarative_catalog_v1`이며 semantic types,
+entities, capabilities, resources, operations, operation contracts,
+operation variants, field mappings, capability implementations, join rules,
+dependencies, planning examples만 포함한다.
+
+제외 대상은 다음과 같다.
+
+```text
+source documents/revisions
+source evidence snapshots
+proposals/proposal_items
+endpoint_checks
+ingestion_runs
+capability_documents/vectors
+planner feedback/execution graphs
+secrets
+```
+
+dashboard는 특정 version을 read-only catalog로 전환해서 보여줄 수 있다.
+export는 JSON 백업을 내려주고, restore는 선택한 snapshot을 현재 catalog
+테이블에 적용한 뒤 새 active version을 만든다. restore는 과거 version row를
+수정하지 않고 `metadata.restored_from_version_id`를 남긴다.
+
 ## Storage
 
 Postgres가 semantic platform의 source of truth다. YAML 파일은 현재 catalog의 원천이 아니다.
@@ -258,11 +285,10 @@ read_source
   -> detect_api_sections_node
   -> extract_structured_evidence_node
   -> load_catalog_context
-  -> verify_endpoint_candidates
   -> llm_propose_capability_catalog
   -> llm_propose_execution_catalog
+  -> verify_endpoint_candidates
   -> verify_capabilities
-  -> keep_passed_verified_capabilities
   -> build_review_proposal
 ```
 
@@ -315,21 +341,19 @@ source evidence snapshot은 source 단위로 유지하고, review/apply 단위�
 
 `load_catalog_context`는 기존 capability catalog, execution summary, governance context를 묶어 LLM에게 제공한다. 이 단계는 runtime planner가 아니다.
 
-`verify_endpoint_candidates`는 문서에서 찾은 endpoint 후보가 실제로 호출 가능한지 probe한다.
-
 `llm_propose_capability_catalog`는 capability, semantic type 등 retrieval-facing catalog 후보를 만든다.
 
 `llm_propose_execution_catalog`는 operation contract, operation variant, field mapping, capability implementation 후보를 만든다.
 
-`verify_capabilities`는 variant의 sample semantic arguments를 사용해 endpoint 검증을 수행한다.
+`verify_endpoint_candidates`는 LLM이 만든 resource/base_url과 문서에서 찾은 endpoint 후보를 기준으로 진단 probe를 수행한다. 이 결과는 evidence이며, LLM proposal 생성을 막는 gate가 아니다.
 
-`keep_passed_verified_capabilities`는 검증 통과 variant 중심으로 proposal 대상만 남긴다.
+`verify_capabilities`는 variant의 sample semantic arguments를 사용해 endpoint 검증을 수행한다.
 
 `build_review_proposal`은 catalog에 바로 반영하지 않고 capability별 `pending_review` proposal을 만든다.
 
 ### Probe Key Env
 
-endpoint 후보 검증은 operation contract가 만들어지기 전 단계라, API key가 필요하면 env에서 읽는다. 문서별 key를 먼저 보고, 없으면 전역 key를 사용한다.
+endpoint 후보 검증은 LLM proposal 이후의 진단 단계다. API key가 필요하면 source에 연결된 secret을 우선 사용하고, 필요 시 env fallback을 사용할 수 있다.
 
 ```env
 SEMANTIC_PLATFORM_CANDIDATE_SERVICE_KEY_<SOURCE_SHA8>=...
@@ -378,6 +402,20 @@ openai
 `openai`는 OpenAI API를 호출하며 `OPENAI_API_KEY`가 필요하다.
 
 `codex_manual`은 외부 LLM을 호출하지 않는다. 대신 Codex가 LLM 응답 JSON을 명시적으로 만들어 graph/API 경계로 넣는다.
+
+source ingestion에서 `codex_manual`을 사용할 때도 manual payload는 반드시
+API/graph 경계의 `manual_llm_response`로 전달한다. runtime code가 query hash,
+문서 id, tmp fixture를 자동 탐색하면 안 된다. Codex는 개발 중
+`tmp/*` 아래에 manual LLM payload, 검증용 request/response JSON 같은
+비밀이 아닌 임시 파일을 직접 만들고 지울 수 있다. secret 값은 env/secret
+store에만 두고 `tmp/*`, evidence, proposal, endpoint check에는 저장하지
+않는다.
+
+여러 source를 한 번에 처리할 때는 source별 ingestion run과 source별 manual
+LLM payload를 분리한다. proposal은 source 전체 단위가 아니라 capability
+단위 review unit으로 남긴다. 같은 의미가 여러 문서에 반복되면 중복
+capability를 하드코딩하지 말고 merge/deprecate 후보로 proposal metadata에
+남긴다.
 
 예를 들어 planner에서는 다음처럼 `manual_plan`을 전달한다.
 
@@ -652,6 +690,11 @@ POST /runtime/context
 GET  /planner/execution-graphs
 GET  /semantic/execution/checks
 POST /semantic/execution/checks
+GET  /catalog/versions
+GET  /catalog/versions/{version_id}
+GET  /catalog/versions/{version_id}/diff
+GET  /catalog/versions/{version_id}/export
+POST /catalog/versions/{version_id}/restore
 GET  /proposals
 POST /proposals/{proposal_id}/apply
 POST /proposals/{proposal_id}/reject
@@ -678,12 +721,14 @@ BGE-m3-ko embedding service
 pgvector hybrid retrieval
 planner API
 codex_manual manual_plan validation
+catalog version snapshot/export/restore
 pubdata_mcp generic HTTP executor
 contract 기반 request transform/validation
 실제 공공 API 호출
 structured result 반환
 dashboard catalog pagination
 dashboard contract/variant/check review
+dashboard catalog version read-only view
 ```
 
 아직 보강이 필요한 것:

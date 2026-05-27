@@ -7,9 +7,10 @@ from typing import Any
 
 DEFAULT_PATTERNS = ("*.md", "*.txt", "*.docx", "*.html", "*.xml", "*.zip")
 SKIP_PARTS = {"proposals", "__pycache__"}
+DEFAULT_IMPORT_ROOT = Path("/app/imports")
 
 
-def scan_sources(root: str | Path = "sources", patterns: tuple[str, ...] = DEFAULT_PATTERNS) -> list[dict[str, Any]]:
+def scan_sources(root: str | Path = DEFAULT_IMPORT_ROOT, patterns: tuple[str, ...] = DEFAULT_PATTERNS) -> list[dict[str, Any]]:
     root_path = Path(root)
     if not root_path.exists():
         return []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from services.semantic_platform.lib.ingestion.evidence import extract_structured_evidence
 from services.semantic_platform.lib.ingestion.llm.proposal import operation_variant_candidates
 from services.semantic_platform.lib.ingestion.proposal.builder import _capability_catalog_closure
 from services.semantic_platform.lib.storage.repository import _capability_document_from_capability
@@ -133,6 +134,39 @@ class CapabilityClosureTests(unittest.TestCase):
         self.assertEqual("getContracts", candidates[0]["operation_name"])
         self.assertEqual("inqryDiv", candidates[0]["controls"][0]["raw_name"])
         self.assertEqual(["1", "2"], [item["value"] for item in candidates[0]["controls"][0]["values"]])
+        self.assertTrue(candidates[0]["controls"][0]["variant_generation_hint"]["should_review_for_variants"])
+
+    def test_control_field_candidates_are_extracted_from_request_rows(self) -> None:
+        blocks = [
+            {
+                "id": "block.00001",
+                "index": 1,
+                "kind": "table_row",
+                "text": "| inqryDiv | 조회구분 | 1 | 1 | 1 | 검색하고자하는 조회구분 1:등록일시, 2:통합계약번호 |",
+            },
+            {
+                "id": "block.00002",
+                "index": 2,
+                "kind": "table_row",
+                "text": "| inqryBgnDt | 조회시작일시 | 12 | 0 | 201608310000 | 조회구분이 1인 경우 필수 |",
+            },
+        ]
+        sections = [
+            {
+                "id": "section.one",
+                "operation_name": "getContracts",
+                "method": "GET",
+                "path": "/getContracts",
+                "block_start": 0,
+                "block_end": 10,
+            }
+        ]
+
+        evidence = extract_structured_evidence(blocks, sections)
+        controls = evidence["control_field_candidates"]
+
+        self.assertEqual("inqryDiv", controls[0]["field_name"])
+        self.assertEqual(["1", "2"], [item["value"] for item in controls[0]["values"]])
 
 
 if __name__ == "__main__":

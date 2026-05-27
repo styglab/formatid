@@ -6,10 +6,8 @@
   "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
   "restart": "unless-stopped",
   "env_files": [
-    "services/semantic_platform/adapters/worker/infra/env/app.env"
-  ],
-  "volumes": [
-    "sources:/app/sources"
+    "services/semantic_platform/adapters/worker/infra/env/app.env",
+    "deploy/compose/env/minio.env"
   ],
   "command": [
     "sh",

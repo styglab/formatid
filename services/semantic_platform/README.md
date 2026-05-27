@@ -18,9 +18,10 @@ internal libraries are separated:
 ```text
 services/semantic_platform/
   adapters/
-    api/        HTTP API adapter
-    dashboard/  browser UI adapter
-    worker/     Prefect/manual background adapter
+    admin_api/          admin/control-plane HTTP API adapter
+    planner_api/  runtime planner API adapter for MCP/executor clients
+    dashboard/    browser UI adapter
+    worker/       Prefect/manual background adapter
   lib/
     ingestion/  source document -> evidence/proposal/apply graph
     planner/    question -> semantic execution plan
@@ -32,6 +33,87 @@ services/semantic_platform/
 `adapters/*` may expose processes and transports. Shared semantic intelligence,
 catalog mutation, graph orchestration, planning, and repository code belong in
 `lib/*`.
+
+The API adapters are intentionally split:
+
+- `adapters/admin_api`: admin/control plane for dashboard, source upload, ingestion,
+  proposal review, catalog governance, and run tracking.
+- `adapters/planner_api`: runtime plane for MCP/executor clients. It exposes
+  approved catalog/contract reads, capability retrieval, endpoint check records,
+  and `POST /semantic/planner/execution-plan`. It must not expose source upload,
+  secret CRUD, ingestion, proposal review, or catalog mutation.
+
+## Ingestion Execution Boundary
+
+The semantic platform API is the canonical ingestion execution boundary.
+Dashboard, CLI, Prefect/manual worker flows, and future automation must start
+source ingestion through the API so every run is recorded in
+`sp_ingestion_runs` and visible on `/ingestion-runs`.
+
+```text
+Source file
+  -> POST /sources/upload
+  -> POST /sources/{source_id}/ingest
+  -> sp_ingestion_runs
+  -> dashboard /ingestion-runs
+```
+
+The ingestion graph implementation remains in `lib/ingestion`, but direct graph
+execution is an internal API-server implementation detail. CLI modules are thin
+API clients; they must not bypass run tracking by calling the graph directly.
+
+## Catalog Versions
+
+Catalog changes that apply approved proposals or mutate governed catalog items
+create catalog version rows in `sp_catalog_versions`. A version is an audit and
+rollback snapshot of the approved declarative catalog, not a dump of every
+runtime artifact.
+
+Snapshot scope:
+
+```text
+approved_declarative_catalog_v1
+```
+
+Included sections:
+
+```text
+semantic_types
+entities
+entity_identifiers
+semantic_join_rules
+capabilities
+capability_entity_links
+capability_dependencies
+planning_examples
+resources
+operations
+operation_fields
+operation_contracts
+operation_variants
+field_mappings
+capability_implementations
+```
+
+Excluded sections include source documents/revisions, evidence snapshots,
+proposals, endpoint checks, ingestion runs, planner feedback, execution graphs,
+secrets, capability documents, and capability vectors.
+
+Version operations:
+
+```text
+GET  /catalog/versions
+GET  /catalog/versions/{version_id}
+GET  /catalog/versions/{version_id}/diff
+GET  /catalog/versions/{version_id}/export
+POST /catalog/versions/{version_id}/restore
+```
+
+Dashboard users can view a version as a read-only catalog snapshot, download it
+as JSON, compare it with the previous active version, or restore it. Restore
+does not rewrite history: it applies the selected snapshot to current catalog
+tables and creates a new active version with `reason=version_restore` and
+`metadata.restored_from_version_id`.
 
 ## Local Development
 
@@ -244,9 +326,9 @@ read_source                         # ingestion/source_loader.py
   -> detect_api_sections
   -> extract_structured_evidence
   -> load_catalog_context
-  -> verify_endpoint_candidates      # ingestion/endpoint_probe.py
   -> llm_propose_capability_catalog
   -> llm_propose_execution_catalog
+  -> verify_endpoint_candidates      # diagnostic probe using generated resource/contract evidence
   -> verify_execution_variants       # ingestion/endpoint_probe.py
   -> build_review_proposal
   -> apply/reject
@@ -260,9 +342,10 @@ read_source                         # ingestion/source_loader.py
 ```text
 services/semantic_platform/
   adapters/
-    api/        HTTP API boundary
-    dashboard/  catalog/planner UI
-    worker/     manual/background ingestion runner
+    admin_api/    admin/control-plane HTTP API boundary
+    planner_api/  runtime planner API boundary
+    dashboard/    catalog/planner UI
+    worker/       manual/background ingestion runner
   lib/
     ingestion/  source document -> evidence -> proposal -> apply
     planner/    question -> semantic execution plan
@@ -320,11 +403,12 @@ Request field rule shape:
 
 ### Source File Metadata
 
-Source file identity should be managed by provider/source metadata, not only by
-content hash. The content hash remains in `sha256` for change detection, but a
-human-readable source id can be supplied with either:
+Source file identity is managed by uploaded source metadata, not by a root
+`sources/` directory. The content hash remains in `sha256` for change
+detection, while files are stored as source revisions in object storage.
 
-- `sources/manifest.json`
+For CLI development only, a human-readable source id can be supplied with:
+
 - sidecar files such as `example.docx.source.json` or `example.source.json`
 - `SEMANTIC_PLATFORM_SOURCE_MANIFEST=/path/to/manifest.json`
 
@@ -416,7 +500,7 @@ apps/pubdata_mcp           = imperative provider execution runtime
 Keep `services/semantic_platform` split by responsibility:
 
 ```text
-adapters/api        HTTP boundary only: catalog/proposal/planner endpoints
+adapters/admin_api        HTTP boundary only: catalog/proposal/planner endpoints
 adapters/dashboard  browser UI only: consumes API data
 adapters/worker     optional Prefect background/manual ingestion runner
 lib/ingestion       source documents -> evidence -> proposals -> optional apply
@@ -476,6 +560,7 @@ sp_planner_feedback
 sp_proposals
 sp_proposal_items
 sp_catalog_lineage
+sp_catalog_versions
 ```
 
 Reset only semantic platform catalog data when starting a clean ingestion
@@ -512,18 +597,18 @@ read_source
   -> detect_api_sections_node
   -> extract_structured_evidence
   -> load_catalog_context
-  -> verify_endpoint_candidates
   -> llm_propose_capability_catalog
   -> llm_propose_execution_catalog
+  -> verify_endpoint_candidates
   -> verify_capabilities
-  -> keep_passed_verified_capabilities
   -> build_review_proposal
   -> store source/chunks/proposals to Postgres
   -> optionally apply proposal
 ```
 
 The graph stores review proposals per capability, not as one large source-level
-proposal. A proposal id is shaped like
+proposal. Endpoint and variant verification results are attached as evidence;
+they must not erase LLM-proposed semantic objects before review. A proposal id is shaped like
 `proposal.<source_document_id>.<capability_id>.review`. Shared resources,
 semantic types, operation contracts, variants, mappings, and implementations
 are grouped into the capability proposal that needs them.
@@ -592,29 +677,73 @@ status is `passed`. `failed` and `inconclusive` endpoint candidates remain in
 the DB/file evidence snapshot for review, but they are not eligible for
 capability proposal or auto-apply.
 
-Run one source:
+Preferred production ingestion is dashboard/API upload. The API stores source
+revisions and records the ingestion run in Postgres:
+
+```bash
+curl -F "file=@/path/to/api_spec.docx" \
+  -F "provider=pps" \
+  -F "title=나라장터 계약정보서비스" \
+  http://localhost:18080/api/sources/upload
+```
+
+CLI ingestion is only a convenience wrapper around the same API boundary. It
+uploads the local file first; it does not require or read the retired root
+`sources/` directory:
 
 ```bash
 python3 -m services.semantic_platform.lib.ingestion.graph \
-  --source sources/국세청_사업자등록정보\ 진위확인\ 및\ 상태조회\ 서비스.md
+  --source /path/to/api_spec.docx
 ```
+
+Production dashboard ingestion expects the API service to run in OpenAI mode:
+
+```env
+LLM_MODE=openai
+OPENAI_API_KEY=...
+```
+
+In that mode the dashboard sends no manual LLM payload. The API parses the
+source, calls OpenAI from the semantic platform service, and records the run in
+`sp_ingestion_runs`.
 
 Apply directly only for controlled runs:
 
 ```bash
 python3 -m services.semantic_platform.lib.ingestion.graph \
-  --source sources/some_api_spec.docx \
+  --source /path/to/api_spec.docx \
+  --llm-mode openai \
+  --llm-secret-ref secret.openai_api_key \
   --apply
 ```
 
-`LLM_MODE=codex_manual` does not read hidden fixtures. If Codex substitutes the
-LLM response, pass it explicitly:
+Worker/CLI development can still use `codex_manual` by passing the manual LLM
+response explicitly through the API boundary. This does not require the API
+service itself to switch out of OpenAI mode for dashboard users:
 
 ```bash
-LLM_MODE=codex_manual python3 -m services.semantic_platform.lib.ingestion.graph \
-  --source sources/some_api_spec.docx \
+python3 -m services.semantic_platform.lib.ingestion.graph \
+  --source /path/to/api_spec.docx \
   --manual-llm-response /tmp/source_llm_response.json
 ```
+
+When `--manual-llm-response` is present, the request is recorded with
+`llm_mode=codex_manual` and `manual_llm_response_provided=true`. Runtime code
+must not auto-discover hidden fixture files or infer provider rules from Korean
+terms; the manual payload is the only substituted LLM output.
+
+For multi-document codex-manual work, keep the unit of execution source-based:
+create one ingestion run per source/revision and one manual LLM payload per
+source. The resulting review units remain capability-scoped proposals shaped as
+`proposal.<source_document_id>.<capability_id>.review`. Do not merge several
+source documents into one proposal. If multiple sources describe the same
+meaning, produce merge/deprecate candidates in proposal metadata rather than
+hard-coding a runtime rule.
+
+Codex/manual development may create, update, validate, copy, and delete
+non-secret temporary artifacts under `tmp/*` without confirmation. This includes
+manual LLM payloads and one-off request/response JSON. Secret values must not be
+written to `tmp/*`.
 
 Candidate endpoint probes may need API keys before operation contracts exist.
 Use source-specific env values first, with global fallback:
@@ -803,6 +932,11 @@ GET  /semantic/governance/feedback
 POST /semantic/governance/feedback
 GET  /semantic/meta
 GET  /sources
+GET  /catalog/versions
+GET  /catalog/versions/{version_id}
+GET  /catalog/versions/{version_id}/diff
+GET  /catalog/versions/{version_id}/export
+POST /catalog/versions/{version_id}/restore
 GET  /proposals
 GET  /proposals/{proposal_id}
 POST /proposals/{proposal_id}/apply

@@ -8,18 +8,22 @@ import requests
 
 
 SEMANTIC_PLATFORM_API_URL = os.getenv("SEMANTIC_PLATFORM_API_URL", "http://semantic-platform-api:8000")
+SEMANTIC_PLATFORM_PLANNER_API_URL = os.getenv(
+    "SEMANTIC_PLATFORM_PLANNER_API_URL",
+    "http://semantic-platform-planner-api:8000",
+)
 SEMANTIC_PLATFORM_API_TIMEOUT = float(os.getenv("SEMANTIC_PLATFORM_API_TIMEOUT", "2"))
 
 
 def load_catalog() -> dict[str, Any]:
-    return _get("/semantic/catalog") or {"core": {}, "domains": {}, "mappings": {}}
+    return _get("/semantic/catalog", runtime=True) or {"core": {}, "domains": {}, "mappings": {}}
 
 
 def semantic_plan_query(query: str, limit: int = 8, manual_plan: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": query, "limit": limit}
     if isinstance(manual_plan, dict):
         payload["manual_plan"] = manual_plan
-    return _post("/planner/plan", payload) or {
+    return _post("/semantic/planner/execution-plan", payload, runtime=True) or {
         "query": query,
         "planner": {"name": "unavailable"},
         "semantic_context": {},
@@ -127,7 +131,7 @@ def semantic_smoke_test_operation(
 
 @lru_cache(maxsize=1)
 def load_execution_contracts() -> dict[str, Any]:
-    data = _get("/semantic/execution/contracts")
+    data = _get("/semantic/execution/contracts", runtime=True)
     if isinstance(data, dict):
         return {
             "capability_implementations": data.get("capability_implementations", {}),
@@ -146,7 +150,7 @@ def load_execution_contracts() -> dict[str, Any]:
 
 
 def record_endpoint_check(check: dict[str, Any]) -> dict[str, Any] | None:
-    return _post("/semantic/execution/checks", check)
+    return _post("/semantic/execution/checks", check, runtime=True)
 
 
 def _normalize_capability_implementations(implementations: Any) -> dict[str, list[dict[str, Any]]]:
@@ -283,10 +287,11 @@ def _semantic_query_evidence(results: list[dict[str, Any]]) -> list[dict[str, An
     return evidence
 
 
-def _get(path: str) -> dict[str, Any] | None:
+def _get(path: str, *, runtime: bool = False) -> dict[str, Any] | None:
+    base_url = SEMANTIC_PLATFORM_PLANNER_API_URL if runtime else SEMANTIC_PLATFORM_API_URL
     try:
         response = requests.get(
-            f"{SEMANTIC_PLATFORM_API_URL.rstrip('/')}{path}",
+            f"{base_url.rstrip('/')}{path}",
             timeout=SEMANTIC_PLATFORM_API_TIMEOUT,
         )
         response.raise_for_status()
@@ -296,10 +301,11 @@ def _get(path: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+def _post(path: str, payload: dict[str, Any], *, runtime: bool = False) -> dict[str, Any] | None:
+    base_url = SEMANTIC_PLATFORM_PLANNER_API_URL if runtime else SEMANTIC_PLATFORM_API_URL
     try:
         response = requests.post(
-            f"{SEMANTIC_PLATFORM_API_URL.rstrip('/')}{path}",
+            f"{base_url.rstrip('/')}{path}",
             json=payload,
             timeout=SEMANTIC_PLATFORM_API_TIMEOUT,
         )

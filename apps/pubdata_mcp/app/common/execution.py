@@ -401,19 +401,37 @@ def _semantic_to_raw_arguments_from_contract(
         fields = request_contract.get(section, {})
         if not isinstance(fields, dict):
             continue
-        for field_name, field_contract in fields.items():
-            if not isinstance(field_contract, dict):
-                continue
-            semantic_type = str(field_contract.get("semantic_type") or "")
-            if semantic_type in semantic_arguments:
-                raw_arguments[str(field_name)] = _contract_argument_value(
-                    semantic_arguments[semantic_type],
-                    str(field_contract.get("transform") or ""),
-                    field_contract,
-                )
-            elif "default" in field_contract:
-                raw_arguments[str(field_name)] = field_contract.get("default")
+        _collect_contract_raw_arguments(raw_arguments, fields, semantic_arguments)
+    flat_fields = request_contract.get("fields", {})
+    if isinstance(flat_fields, dict):
+        _collect_contract_raw_arguments(raw_arguments, flat_fields, semantic_arguments)
+    defaults = request_contract.get("defaults")
+    if isinstance(defaults, dict):
+        for field_name, value in defaults.items():
+            raw_arguments.setdefault(str(field_name), value)
     return {key: value for key, value in raw_arguments.items() if value not in (None, "")}
+
+
+def _collect_contract_raw_arguments(
+    raw_arguments: dict[str, Any],
+    fields: dict[str, Any],
+    semantic_arguments: dict[str, Any],
+) -> None:
+    for field_name, field_contract in fields.items():
+        if not isinstance(field_contract, dict):
+            continue
+        field = str(field_name)
+        semantic_type = str(field_contract.get("semantic_type") or "")
+        if semantic_type in semantic_arguments:
+            raw_arguments[field] = _contract_argument_value(
+                semantic_arguments[semantic_type],
+                str(field_contract.get("transform") or ""),
+                field_contract,
+            )
+        elif field in semantic_arguments:
+            raw_arguments[field] = semantic_arguments[field]
+        elif "default" in field_contract:
+            raw_arguments[field] = field_contract.get("default")
 
 
 def _missing_required_semantic_arguments(
@@ -426,16 +444,28 @@ def _missing_required_semantic_arguments(
         fields = request_contract.get(section, {})
         if not isinstance(fields, dict):
             continue
-        for field_contract in fields.values():
-            if not isinstance(field_contract, dict) or not field_contract.get("required"):
-                continue
-            semantic_type = str(field_contract.get("semantic_type") or "")
-            if not semantic_type:
-                continue
-            value = semantic_arguments.get(semantic_type)
-            if value in (None, "", [], {}):
-                missing.append(semantic_type)
+        _collect_missing_required(missing, fields, semantic_arguments)
+    flat_fields = request_contract.get("fields", {})
+    if isinstance(flat_fields, dict):
+        _collect_missing_required(missing, flat_fields, semantic_arguments)
     return sorted(set(missing))
+
+
+def _collect_missing_required(
+    missing: list[str],
+    fields: dict[str, Any],
+    semantic_arguments: dict[str, Any],
+) -> None:
+    for field_contract in fields.values():
+        if not isinstance(field_contract, dict) or not field_contract.get("required"):
+            continue
+        semantic_type = str(field_contract.get("semantic_type") or "")
+        if not semantic_type:
+            continue
+        value = semantic_arguments.get(semantic_type)
+        has_default = "default" in field_contract and field_contract.get("default") not in (None, "", [], {})
+        if value in (None, "", [], {}) and not has_default:
+            missing.append(semantic_type)
 
 
 def _contract_argument_value(value: Any, transform: str, field_contract: dict[str, Any]) -> Any:
@@ -446,12 +476,23 @@ def _contract_argument_value(value: Any, transform: str, field_contract: dict[st
             return mapped
     transformed = _apply_declared_transform(value, field_contract.get("transform"))
     if not isinstance(transformed, dict):
-        return transformed
+        return _format_contract_argument(transformed, field_contract)
     if transform == "date_start":
-        return transformed.get("start") or transformed.get("from")
+        return _format_contract_argument(transformed.get("start") or transformed.get("from"), field_contract)
     if transform == "date_end":
-        return transformed.get("end") or transformed.get("to")
+        return _format_contract_argument(transformed.get("end") or transformed.get("to"), field_contract)
     return transformed
+
+
+def _format_contract_argument(value: Any, field_contract: dict[str, Any]) -> Any:
+    value_format = str(field_contract.get("format") or "")
+    if value_format in {"yyyyMMddHHmm", "YYYYMMDDHHmm"}:
+        digits = _digits_only(str(value))
+        return digits[:12] if len(digits) >= 12 else digits
+    if value_format in {"yyyyMMdd", "YYYYMMDD"}:
+        digits = _digits_only(str(value))
+        return digits[:8] if len(digits) >= 8 else digits
+    return value
 
 
 def _apply_declared_transform(value: Any, transform: Any) -> Any:
@@ -868,6 +909,16 @@ def _split_request_arguments(
     request_contract = operation_contract.get("request", {}) if isinstance(operation_contract.get("request"), dict) else {}
     query_fields = set((request_contract.get("query") or {}).keys()) if isinstance(request_contract.get("query"), dict) else set()
     body_fields = set((request_contract.get("body") or {}).keys()) if isinstance(request_contract.get("body"), dict) else set()
+    flat_fields = request_contract.get("fields", {})
+    if isinstance(flat_fields, dict):
+        for field_name, field_contract in flat_fields.items():
+            if not isinstance(field_contract, dict):
+                continue
+            location = str(field_contract.get("location") or "query").lower()
+            if location == "body":
+                body_fields.add(str(field_name))
+            else:
+                query_fields.add(str(field_name))
     auth = operation_contract.get("auth", {}) if isinstance(operation_contract.get("auth"), dict) else {}
     auth_parameter = str(auth.get("parameter") or "")
     auth_location = str(auth.get("in") or "query")

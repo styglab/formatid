@@ -13,6 +13,12 @@
       "strip_prefix": true
     },
     {
+      "path_prefix": "/semantic-platform-planner",
+      "upstream_service": "semantic-platform-planner-api",
+      "upstream_port": 8000,
+      "strip_prefix": true
+    },
+    {
       "path_prefix": "/semantic-platform-dashboard",
       "upstream_service": "semantic-platform-dashboard",
       "upstream_port": 80,
@@ -22,9 +28,11 @@
   "requires": {
     "platform_services": [
       "semantic-platform-api",
+      "semantic-platform-planner-api",
       "semantic-platform-dashboard",
       "semantic-platform-worker",
       "embedding-service",
+      "minio",
       "prefect-server",
       "prefect-services"
     ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -9,8 +10,45 @@ from typing import Any, Iterator
 LLM_MODES = {"disabled", "codex_manual", "openai"}
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
-INGESTION_GRAPH_VERSION = "2026-05-19.capability-closure-v2"
-INGESTION_PROMPT_VERSION = "2026-05-19.llm-first-v1"
+INGESTION_GRAPH_VERSION = "2026-05-27.llm-first-verification-v1"
+INGESTION_PROMPT_VERSION = "2026-05-27.contract-interpreter-v4"
+CATALOG_VERSION_SCOPE = "approved_declarative_catalog_v1"
+CATALOG_VERSION_SECTIONS = (
+    "semantic_types",
+    "entities",
+    "entity_identifiers",
+    "semantic_join_rules",
+    "capabilities",
+    "capability_entity_links",
+    "capability_dependencies",
+    "planning_examples",
+    "resources",
+    "operations",
+    "operation_fields",
+    "operation_contracts",
+    "operation_variants",
+    "field_mappings",
+    "capability_implementations",
+)
+CATALOG_VERSION_RESTORE_APPLY_ORDER = (
+    "semantic_types",
+    "entities",
+    "capabilities",
+    "resources",
+    "operations",
+    "entity_identifiers",
+    "semantic_join_rules",
+    "capability_entity_links",
+    "capability_dependencies",
+    "planning_examples",
+    "operation_fields",
+    "operation_contracts",
+    "operation_variants",
+    "field_mappings",
+    "capability_implementations",
+)
+CATALOG_VERSION_RESTORE_DELETE_ORDER = tuple(reversed(CATALOG_VERSION_RESTORE_APPLY_ORDER))
+_SCHEMA_READY = False
 
 
 def database_url() -> str:
@@ -22,6 +60,23 @@ def database_url() -> str:
     port = os.getenv("POSTGRES_PORT", "5432")
     database = os.getenv("POSTGRES_DB", "postgres")
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+
+def _secret_fingerprint(secret_value: str | None) -> dict[str, Any]:
+    if not secret_value:
+        return {}
+    value = str(secret_value)
+    if not value:
+        return {}
+    if len(value) <= 8:
+        preview = f"{value[:2]}...{value[-2:]}"
+    else:
+        preview = f"{value[:4]}...{value[-4:]}"
+    return {
+        "preview": preview,
+        "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
+        "length": len(value),
+    }
 
 
 class SemanticCatalogRepository:
@@ -37,7 +92,13 @@ class SemanticCatalogRepository:
             yield conn
 
     def ensure_schema(self) -> None:
+        global _SCHEMA_READY
+        if _SCHEMA_READY:
+            return
         with self.connect() as conn:
+            conn.execute("select pg_advisory_xact_lock(hashtext('semantic_platform.ensure_schema'))")
+            if _SCHEMA_READY:
+                return
             vector_enabled = self._ensure_vector_extension(conn)
             conn.execute(
                 """
@@ -63,6 +124,65 @@ class SemanticCatalogRepository:
                 where file_name is null
                 """
             )
+            conn.execute(
+                """
+                create table if not exists sp_sources (
+                    id text primary key,
+                    provider text,
+                    provider_name_ko text,
+                    title text not null,
+                    status text not null default 'active',
+                    current_revision_id text,
+                    auth_secret_refs text[] not null default '{}',
+                    auth_parameter_names text[] not null default '{}',
+                    metadata jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_source_revisions (
+                    id text primary key,
+                    source_id text not null references sp_sources(id) on delete cascade,
+                    revision_number integer not null,
+                    file_name text not null,
+                    content_type text,
+                    size_bytes bigint not null default 0,
+                    sha256 text not null,
+                    object_uri text not null,
+                    object_bucket text not null,
+                    object_key text not null,
+                    uploaded_by text,
+                    metadata jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    unique(source_id, revision_number),
+                    unique(source_id, sha256)
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_secrets (
+                    id text primary key,
+                    provider text,
+                    name text not null,
+                    description text,
+                    secret_value text,
+                    value_preview text,
+                    value_sha256 text,
+                    value_length integer,
+                    status text not null default 'active',
+                    metadata jsonb not null default '{}'::jsonb,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute("alter table sp_secrets add column if not exists value_preview text")
+            conn.execute("alter table sp_secrets add column if not exists value_sha256 text")
+            conn.execute("alter table sp_secrets add column if not exists value_length integer")
             conn.execute(
                 """
                 create table if not exists sp_source_chunks (
@@ -469,6 +589,26 @@ class SemanticCatalogRepository:
             )
             conn.execute(
                 """
+                create table if not exists sp_ingestion_runs (
+                    id text primary key,
+                    source_id text not null references sp_sources(id) on delete cascade,
+                    revision_id text references sp_source_revisions(id) on delete set null,
+                    status text not null default 'queued',
+                    commit_mode text not null default 'proposal',
+                    current_step text,
+                    requested_by text,
+                    request jsonb not null default '{}'::jsonb,
+                    result jsonb not null default '{}'::jsonb,
+                    error_message text,
+                    started_at timestamptz,
+                    finished_at timestamptz,
+                    created_at timestamptz not null default now(),
+                    updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
                 create table if not exists sp_planner_feedback (
                     id text primary key,
                     execution_graph_id text references sp_execution_graphs(id) on delete set null,
@@ -481,6 +621,23 @@ class SemanticCatalogRepository:
                     status text not null default 'open',
                     created_at timestamptz not null default now(),
                     updated_at timestamptz not null default now()
+                )
+                """
+            )
+            conn.execute(
+                """
+                create table if not exists sp_catalog_versions (
+                    id text primary key,
+                    version_number bigint not null unique,
+                    status text not null default 'active',
+                    reason text,
+                    proposal_id text references sp_proposals(id) on delete set null,
+                    snapshot jsonb not null default '{}'::jsonb,
+                    snapshot_sha256 text not null,
+                    counts jsonb not null default '{}'::jsonb,
+                    metadata jsonb not null default '{}'::jsonb,
+                    created_by text not null default 'system',
+                    created_at timestamptz not null default now()
                 )
                 """
             )
@@ -514,6 +671,9 @@ class SemanticCatalogRepository:
             conn.execute("create index if not exists sp_semantic_join_rules_to_idx on sp_semantic_join_rules(to_entity_id, to_semantic_type_id)")
             conn.execute("create index if not exists sp_planning_examples_status_idx on sp_planning_examples(status)")
             conn.execute("create index if not exists sp_source_evidence_snapshots_source_idx on sp_source_evidence_snapshots(source_document_id, snapshot_type)")
+            conn.execute("create index if not exists sp_sources_provider_idx on sp_sources(provider, status)")
+            conn.execute("create index if not exists sp_source_revisions_source_idx on sp_source_revisions(source_id, revision_number desc)")
+            conn.execute("create index if not exists sp_secrets_provider_idx on sp_secrets(provider, status)")
             conn.execute(
                 """
                 create unique index if not exists sp_operation_fields_unique_idx
@@ -534,9 +694,13 @@ class SemanticCatalogRepository:
                     using ivfflat (embedding vector_cosine_ops)
                     with (lists = 100)
                     """
-                )
+            )
             conn.execute("create index if not exists sp_execution_graphs_created_idx on sp_execution_graphs(created_at desc)")
+            conn.execute("create index if not exists sp_ingestion_runs_created_idx on sp_ingestion_runs(created_at desc)")
+            conn.execute("create index if not exists sp_ingestion_runs_source_idx on sp_ingestion_runs(source_id, created_at desc)")
             conn.execute("create index if not exists sp_planner_feedback_created_idx on sp_planner_feedback(created_at desc)")
+            conn.execute("create index if not exists sp_catalog_versions_created_idx on sp_catalog_versions(created_at desc)")
+            conn.execute("create index if not exists sp_catalog_versions_status_idx on sp_catalog_versions(status, version_number desc)")
             conn.execute(
                 """
                 create unique index if not exists sp_capability_implementations_variant_unique_idx
@@ -544,6 +708,394 @@ class SemanticCatalogRepository:
                 """
             )
             conn.commit()
+            _SCHEMA_READY = True
+
+    def secrets(self) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select id, provider, name, description, status, metadata,
+                       secret_value is not null and secret_value <> '' as has_value,
+                       value_preview,
+                       value_sha256,
+                       value_length,
+                       created_at, updated_at
+                from sp_secrets
+                order by provider nulls last, name, id
+                """
+            ).fetchall()
+            return {"secrets": [dict(row) for row in rows]}
+
+    def secret_value(self, secret_id: str) -> str | None:
+        self.ensure_schema()
+        normalized = str(secret_id or "").strip()
+        if normalized and not normalized.startswith("secret."):
+            normalized = f"secret.{normalized}"
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select secret_value
+                from sp_secrets
+                where id = %s
+                  and status in ('active', 'approved')
+                """,
+                (normalized,),
+            ).fetchone()
+            if not row:
+                return None
+            value = row.get("secret_value")
+            return str(value) if value else None
+
+    def upsert_secret(
+        self,
+        *,
+        secret_id: str,
+        name: str,
+        provider: str | None = None,
+        description: str | None = None,
+        secret_value: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        allow_update: bool = True,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        fingerprint = _secret_fingerprint(secret_value)
+        with self.connect() as conn:
+            if not allow_update:
+                row = conn.execute(
+                    """
+                    insert into sp_secrets(id, provider, name, description, secret_value,
+                                           value_preview, value_sha256, value_length, metadata, updated_at)
+                    values (%s, %s, %s, %s, nullif(%s, ''), %s, %s, %s, %s, now())
+                    on conflict (id) do nothing
+                    returning id, provider, name, description, status, metadata,
+                              secret_value is not null and secret_value <> '' as has_value,
+                              value_preview, value_sha256, value_length,
+                              created_at, updated_at
+                    """,
+                    (
+                        secret_id,
+                        provider,
+                        name,
+                        description,
+                        secret_value,
+                        fingerprint.get("preview"),
+                        fingerprint.get("sha256"),
+                        fingerprint.get("length"),
+                        _jsonb(metadata or {}),
+                    ),
+                ).fetchone()
+                if not row:
+                    conn.rollback()
+                    raise FileExistsError(secret_id)
+                conn.commit()
+                return dict(row)
+
+            row = conn.execute(
+                """
+                insert into sp_secrets(id, provider, name, description, secret_value,
+                                       value_preview, value_sha256, value_length, metadata, updated_at)
+                values (%s, %s, %s, %s, nullif(%s, ''), %s, %s, %s, %s, now())
+                on conflict (id) do update set
+                    provider = excluded.provider,
+                    name = excluded.name,
+                    description = excluded.description,
+                    secret_value = coalesce(excluded.secret_value, sp_secrets.secret_value),
+                    value_preview = coalesce(excluded.value_preview, sp_secrets.value_preview),
+                    value_sha256 = coalesce(excluded.value_sha256, sp_secrets.value_sha256),
+                    value_length = coalesce(excluded.value_length, sp_secrets.value_length),
+                    metadata = sp_secrets.metadata || excluded.metadata,
+                    updated_at = now()
+                returning id, provider, name, description, status, metadata,
+                          secret_value is not null and secret_value <> '' as has_value,
+                          value_preview, value_sha256, value_length,
+                          created_at, updated_at
+                """,
+                (
+                    secret_id,
+                    provider,
+                    name,
+                    description,
+                    secret_value,
+                    fingerprint.get("preview"),
+                    fingerprint.get("sha256"),
+                    fingerprint.get("length"),
+                    _jsonb(metadata or {}),
+                ),
+            ).fetchone()
+            conn.commit()
+            return dict(row)
+
+    def delete_secret(self, secret_id: str) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                delete from sp_secrets
+                where id = %s
+                returning id, provider, name, status
+                """,
+                (secret_id,),
+            ).fetchone()
+            conn.commit()
+            if not row:
+                raise FileNotFoundError(secret_id)
+            return {"deleted": dict(row)}
+
+    def source_exists(self, source_id: str) -> bool:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute("select 1 from sp_sources where id = %s", (source_id,)).fetchone()
+            return bool(row)
+
+    def source_revision_by_sha(self, source_id: str, sha256: str) -> dict[str, Any] | None:
+        self.ensure_schema()
+        with self.connect() as conn:
+            revision = conn.execute(
+                "select * from sp_source_revisions where source_id = %s and sha256 = %s",
+                (source_id, sha256),
+            ).fetchone()
+            if not revision:
+                return None
+            source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+            return {
+                "source": dict(source) if source else None,
+                "revision": dict(revision),
+                "created": False,
+                "reason": "revision_already_exists",
+            }
+
+    def source_revision(self, source_id: str, revision_id: str | None = None) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+            if not source:
+                raise FileNotFoundError(source_id)
+            selected_revision_id = revision_id or source.get("current_revision_id")
+            if not selected_revision_id:
+                raise FileNotFoundError(f"{source_id}: current revision not found")
+            revision = conn.execute(
+                "select * from sp_source_revisions where source_id = %s and id = %s",
+                (source_id, selected_revision_id),
+            ).fetchone()
+            if not revision:
+                raise FileNotFoundError(selected_revision_id)
+            return {"source": dict(source), "revision": dict(revision)}
+
+    def create_ingestion_run(
+        self,
+        *,
+        run_id: str,
+        source_id: str,
+        revision_id: str | None = None,
+        commit_mode: str = "proposal",
+        requested_by: str | None = None,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                insert into sp_ingestion_runs(id, source_id, revision_id, status, commit_mode,
+                                              requested_by, request, current_step, updated_at)
+                values (%s, %s, %s, 'queued', %s, %s, %s, 'queued', now())
+                returning *
+                """,
+                (run_id, source_id, revision_id, commit_mode, requested_by, _jsonb(request or {})),
+            ).fetchone()
+            conn.commit()
+            return dict(row)
+
+    def update_ingestion_run(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        current_step: str | None = None,
+        result: dict[str, Any] | None = None,
+        error_message: str | None = None,
+        mark_started: bool = False,
+        mark_finished: bool = False,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                update sp_ingestion_runs
+                set status = coalesce(%s, status),
+                    current_step = coalesce(%s, current_step),
+                    result = case when %s::jsonb is null then result else %s::jsonb end,
+                    error_message = %s,
+                    started_at = case when %s then coalesce(started_at, now()) else started_at end,
+                    finished_at = case when %s then now() else finished_at end,
+                    updated_at = now()
+                where id = %s
+                returning *
+                """,
+                (
+                    status,
+                    current_step,
+                    _jsonb(result) if result is not None else None,
+                    _jsonb(result) if result is not None else None,
+                    error_message,
+                    mark_started,
+                    mark_finished,
+                    run_id,
+                ),
+            ).fetchone()
+            conn.commit()
+            if not row:
+                raise FileNotFoundError(run_id)
+            return dict(row)
+
+    def ingestion_runs(self, limit: int = 100, source_id: str | None = None) -> dict[str, Any]:
+        self.ensure_schema()
+        limit = max(1, min(int(limit), 500))
+        with self.connect() as conn:
+            if source_id:
+                rows = conn.execute(
+                    """
+                    select run.*, source.title, revision.file_name, revision.revision_number
+                    from sp_ingestion_runs run
+                    left join sp_sources source on source.id = run.source_id
+                    left join sp_source_revisions revision on revision.id = run.revision_id
+                    where run.source_id = %s
+                    order by run.created_at desc
+                    limit %s
+                    """,
+                    (source_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    select run.*, source.title, revision.file_name, revision.revision_number
+                    from sp_ingestion_runs run
+                    left join sp_sources source on source.id = run.source_id
+                    left join sp_source_revisions revision on revision.id = run.revision_id
+                    order by run.created_at desc
+                    limit %s
+                    """,
+                    (limit,),
+                ).fetchall()
+            return {"ingestion_runs": [dict(row) for row in rows]}
+
+    def ingestion_run(self, run_id: str) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select run.*, source.title, revision.file_name, revision.revision_number
+                from sp_ingestion_runs run
+                left join sp_sources source on source.id = run.source_id
+                left join sp_source_revisions revision on revision.id = run.revision_id
+                where run.id = %s
+                """,
+                (run_id,),
+            ).fetchone()
+            if not row:
+                raise FileNotFoundError(run_id)
+            return {"ingestion_run": dict(row)}
+
+    def update_source(
+        self,
+        source_id: str,
+        *,
+        provider: str | None = None,
+        provider_name_ko: str | None = None,
+        title: str | None = None,
+        auth_secret_refs: list[str] | None = None,
+        auth_parameter_names: list[str] | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                update sp_sources
+                set provider = %s,
+                    provider_name_ko = %s,
+                    title = %s,
+                    auth_secret_refs = %s,
+                    auth_parameter_names = %s,
+                    status = coalesce(%s, status),
+                    updated_at = now()
+                where id = %s
+                returning *
+                """,
+                (
+                    provider,
+                    provider_name_ko,
+                    title,
+                    auth_secret_refs or [],
+                    auth_parameter_names or [],
+                    status,
+                    source_id,
+                ),
+            ).fetchone()
+            conn.commit()
+            if not row:
+                raise FileNotFoundError(source_id)
+            return {"source": dict(row)}
+
+    def source_delete_plan(self, source_id: str) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+            if not source:
+                raise FileNotFoundError(source_id)
+            counts = self._source_related_counts(conn, source_id)
+            return {
+                "source": {key: source[key] for key in ("id", "provider", "title", "status") if key in source},
+                "counts": counts,
+                "modes": [
+                    {"mode": "archive", "label": "Archive source only", "destructive": False},
+                    {"mode": "registry_only", "label": "Delete source registry only", "destructive": True},
+                    {"mode": "with_ingestion_artifacts", "label": "Delete source + proposals/evidence", "destructive": True},
+                    {"mode": "with_catalog", "label": "Delete source + related catalog", "destructive": True},
+                ],
+            }
+
+    def delete_source(self, source_id: str, *, mode: str = "archive") -> dict[str, Any]:
+        self.ensure_schema()
+        allowed_modes = {"archive", "registry_only", "with_ingestion_artifacts", "with_catalog"}
+        if mode not in allowed_modes:
+            raise ValueError(f"unsupported delete mode: {mode}")
+        with self.connect() as conn:
+            source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+            if not source:
+                raise FileNotFoundError(source_id)
+            before = self._source_related_counts(conn, source_id)
+            if mode == "archive":
+                row = conn.execute(
+                    """
+                    update sp_sources
+                    set status = 'archived', updated_at = now()
+                    where id = %s
+                    returning id, provider, title, status
+                    """,
+                    (source_id,),
+                ).fetchone()
+                conn.commit()
+                return {"mode": mode, "source": dict(row), "before": before}
+
+            if mode == "with_catalog":
+                self._delete_source_catalog(conn, source_id)
+            if mode in {"with_ingestion_artifacts", "with_catalog"}:
+                conn.execute("delete from sp_proposals where source_document_id = %s", (source_id,))
+                conn.execute("delete from sp_source_evidence_snapshots where source_document_id = %s", (source_id,))
+                conn.execute("delete from sp_source_chunks where source_document_id = %s", (source_id,))
+                conn.execute("delete from sp_source_documents where id = %s", (source_id,))
+            row = conn.execute(
+                """
+                delete from sp_sources
+                where id = %s
+                returning id, provider, title, status
+                """,
+                (source_id,),
+            ).fetchone()
+            conn.commit()
+            after = self._source_related_counts(conn, source_id)
+            return {"mode": mode, "deleted": dict(row), "before": before, "after": after}
 
     def reset_catalog(self) -> dict[str, Any]:
         """Clear semantic platform catalog data while keeping schema and extensions."""
@@ -581,6 +1133,99 @@ class SemanticCatalogRepository:
                 row = conn.execute(f"select count(*) as count from {table}").fetchone()
                 counts[table] = int(row["count"] or 0)
         return counts
+
+    def _source_related_counts(self, conn: Any, source_id: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        queries = {
+            "source_revisions": "select count(*)::int as count from sp_source_revisions where source_id = %s",
+            "source_documents": "select count(*)::int as count from sp_source_documents where id = %s",
+            "source_chunks": "select count(*)::int as count from sp_source_chunks where source_document_id = %s",
+            "source_evidence_snapshots": "select count(*)::int as count from sp_source_evidence_snapshots where source_document_id = %s",
+            "proposals": "select count(*)::int as count from sp_proposals where source_document_id = %s",
+            "proposal_items": """
+                select count(*)::int as count
+                from sp_proposal_items item
+                join sp_proposals proposal on proposal.id = item.proposal_id
+                where proposal.source_document_id = %s
+            """,
+            "resources": "select count(*)::int as count from sp_resources where source_document_id = %s",
+            "operations": "select count(*)::int as count from sp_operations where source_document_id = %s",
+            "operation_fields": """
+                select count(*)::int as count
+                from sp_operation_fields field
+                join sp_operations operation on operation.operation_id = field.operation_id
+                where operation.source_document_id = %s
+            """,
+            "capabilities": "select count(*)::int as count from sp_capabilities where provenance->>'source_document_id' = %s",
+            "capability_documents": """
+                select count(*)::int as count
+                from sp_capability_documents document
+                join sp_capabilities capability on capability.id = document.capability_id
+                where capability.provenance->>'source_document_id' = %s
+            """,
+            "operation_contracts": """
+                select count(*)::int as count
+                from sp_operation_contracts contract
+                join sp_operations operation on operation.operation_id = contract.operation_id
+                where operation.source_document_id = %s
+            """,
+            "operation_variants": """
+                select count(*)::int as count
+                from sp_operation_variants variant
+                join sp_operations operation on operation.operation_id = variant.operation_id
+                where operation.source_document_id = %s
+            """,
+            "field_mappings": """
+                select count(*)::int as count
+                from sp_field_mappings mapping
+                join sp_operations operation on operation.operation_id = mapping.operation_id
+                where operation.source_document_id = %s
+            """,
+            "capability_implementations": """
+                select count(*)::int as count
+                from sp_capability_implementations implementation
+                join sp_operations operation on operation.operation_id = implementation.operation_id
+                where operation.source_document_id = %s
+            """,
+            "lineage": "select count(*)::int as count from sp_catalog_lineage where source_document_id = %s",
+        }
+        for key, query in queries.items():
+            try:
+                counts[key] = int(conn.execute(query, (source_id,)).fetchone()["count"])
+            except Exception:
+                conn.rollback()
+                counts[key] = 0
+        return counts
+
+    def _delete_source_catalog(self, conn: Any, source_id: str) -> None:
+        operation_rows = conn.execute(
+            "select operation_id from sp_operations where source_document_id = %s",
+            (source_id,),
+        ).fetchall()
+        operation_ids = [row["operation_id"] for row in operation_rows]
+        capability_rows = conn.execute(
+            "select id from sp_capabilities where provenance->>'source_document_id' = %s",
+            (source_id,),
+        ).fetchall()
+        capability_ids = [row["id"] for row in capability_rows]
+        if operation_ids:
+            conn.execute("delete from sp_operation_contracts where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_operation_variants where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_field_mappings where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_capability_implementations where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_operation_fields where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_endpoint_checks where operation_id = any(%s)", (operation_ids,))
+            conn.execute("delete from sp_operations where operation_id = any(%s)", (operation_ids,))
+        if capability_ids:
+            conn.execute("delete from sp_capability_documents where capability_id = any(%s)", (capability_ids,))
+            conn.execute("delete from sp_capability_entity_links where capability_id = any(%s)", (capability_ids,))
+            conn.execute("delete from sp_capability_dependencies where capability_id = any(%s)", (capability_ids,))
+            conn.execute("delete from sp_capability_dependencies where depends_on_capability_id = any(%s)", (capability_ids,))
+            conn.execute("delete from sp_capability_implementations where capability_id = any(%s)", (capability_ids,))
+            conn.execute("delete from sp_planning_examples where expected_capability_ids && %s", (capability_ids,))
+            conn.execute("delete from sp_capabilities where id = any(%s)", (capability_ids,))
+        conn.execute("delete from sp_resources where source_document_id = %s", (source_id,))
+        conn.execute("delete from sp_catalog_lineage where source_document_id = %s", (source_id,))
 
     def _ensure_vector_extension(self, conn: Any) -> bool:
         try:
@@ -706,6 +1351,109 @@ class SemanticCatalogRepository:
             conn.commit()
             return dict(row)
 
+    def create_source_revision(
+        self,
+        *,
+        source_id: str,
+        provider: str | None,
+        provider_name_ko: str | None,
+        title: str,
+        file_name: str,
+        content_type: str | None,
+        size_bytes: int,
+        sha256: str,
+        object_uri: str,
+        object_bucket: str,
+        object_key: str,
+        status: str = "active",
+        auth_secret_refs: list[str] | None = None,
+        auth_parameter_names: list[str] | None = None,
+        uploaded_by: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        allow_update: bool = True,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            if not allow_update:
+                source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+                if source:
+                    raise FileExistsError(source_id)
+            existing = conn.execute(
+                "select * from sp_source_revisions where source_id = %s and sha256 = %s",
+                (source_id, sha256),
+            ).fetchone()
+            if existing:
+                source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+                return {
+                    "source": dict(source) if source else None,
+                    "revision": dict(existing),
+                    "created": False,
+                    "reason": "revision_already_exists",
+                }
+            current = conn.execute(
+                "select coalesce(max(revision_number), 0) + 1 as next_revision from sp_source_revisions where source_id = %s",
+                (source_id,),
+            ).fetchone()
+            revision_number = int(current["next_revision"])
+            revision_id = f"source_revision.{source_id.removeprefix('source.')}.{revision_number:03d}"
+            source = conn.execute(
+                """
+                insert into sp_sources(id, provider, provider_name_ko, title, status,
+                                       auth_secret_refs, auth_parameter_names, metadata, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                on conflict (id) do update set
+                    provider = coalesce(excluded.provider, sp_sources.provider),
+                    provider_name_ko = coalesce(excluded.provider_name_ko, sp_sources.provider_name_ko),
+                    title = excluded.title,
+                    status = excluded.status,
+                    auth_secret_refs = excluded.auth_secret_refs,
+                    auth_parameter_names = excluded.auth_parameter_names,
+                    metadata = sp_sources.metadata || excluded.metadata,
+                    updated_at = now()
+                returning *
+                """,
+                (
+                    source_id,
+                    provider,
+                    provider_name_ko,
+                    title,
+                    status,
+                    auth_secret_refs or [],
+                    auth_parameter_names or [],
+                    _jsonb(metadata or {}),
+                ),
+            ).fetchone()
+            revision = conn.execute(
+                """
+                insert into sp_source_revisions(id, source_id, revision_number, file_name, content_type,
+                                                size_bytes, sha256, object_uri, object_bucket, object_key,
+                                                uploaded_by, metadata)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                returning *
+                """,
+                (
+                    revision_id,
+                    source_id,
+                    revision_number,
+                    file_name,
+                    content_type,
+                    int(size_bytes),
+                    sha256,
+                    object_uri,
+                    object_bucket,
+                    object_key,
+                    uploaded_by,
+                    _jsonb(metadata or {}),
+                ),
+            ).fetchone()
+            conn.execute(
+                "update sp_sources set current_revision_id = %s, updated_at = now() where id = %s",
+                (revision_id, source_id),
+            )
+            source = conn.execute("select * from sp_sources where id = %s", (source_id,)).fetchone()
+            conn.commit()
+            return {"source": dict(source), "revision": dict(revision), "created": True}
+
     def record_endpoint_check(self, check: dict[str, Any]) -> dict[str, Any]:
         self.ensure_schema()
         with self.connect() as conn:
@@ -805,64 +1553,17 @@ class SemanticCatalogRepository:
 
     def rebuild_capability_documents(self, capability_ids: list[str] | None = None) -> dict[str, Any]:
         self.ensure_schema()
-        catalog = self.catalog()
         selected_capability_ids = {str(value) for value in (capability_ids or []) if str(value or "")}
-        documents = []
         with self.connect() as conn:
             if capability_ids is not None and not selected_capability_ids:
                 total_count = conn.execute(
                     "select count(*) from sp_capability_documents where status in ('active', 'approved')"
                 ).fetchone()["count"]
                 return {"capability_documents": [], "count": 0, "total_count": total_count, "capability_ids": []}
-            for capability_id, capability in catalog.get("capabilities", {}).items():
-                if selected_capability_ids and str(capability_id) not in selected_capability_ids:
-                    continue
-                document = _capability_document_from_capability(capability_id, capability, catalog)
-                row = conn.execute(
-                    """
-                    insert into sp_capability_documents(id, capability_id, document_text, aliases, examples,
-                                                        intent_patterns, semantic_entities, planning_hints,
-                                                        inputs, outputs, tags, embedding_model, embedding,
-                                                        vector_status, status, provenance, updated_at)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                    on conflict (id) do update set
-                        document_text = excluded.document_text,
-                        aliases = excluded.aliases,
-                        examples = excluded.examples,
-                        intent_patterns = excluded.intent_patterns,
-                        semantic_entities = excluded.semantic_entities,
-                        planning_hints = excluded.planning_hints,
-                        inputs = excluded.inputs,
-                        outputs = excluded.outputs,
-                        tags = excluded.tags,
-                        embedding_model = excluded.embedding_model,
-                        embedding = excluded.embedding,
-                        vector_status = excluded.vector_status,
-                        status = excluded.status,
-                        provenance = excluded.provenance,
-                        updated_at = now()
-                    returning *
-                    """,
-                    (
-                        document["id"],
-                        document["capability_id"],
-                        document["document_text"],
-                        _jsonb(document.get("aliases", [])),
-                        _jsonb(document.get("examples", [])),
-                        _jsonb(document.get("intent_patterns", [])),
-                        _jsonb(document.get("semantic_entities", [])),
-                        _jsonb(document.get("planning_hints", {})),
-                        _jsonb(document.get("inputs", [])),
-                        _jsonb(document.get("outputs", [])),
-                        _jsonb(document.get("tags", [])),
-                        document.get("embedding_model"),
-                        _jsonb(document.get("embedding")) if document.get("embedding") is not None else None,
-                        document.get("vector_status", "not_embedded"),
-                        document.get("status", "active"),
-                        _jsonb(document.get("provenance", {})),
-                    ),
-                ).fetchone()
-                documents.append(dict(row))
+            documents = self._rebuild_capability_documents_in_conn(
+                conn,
+                capability_ids=sorted(selected_capability_ids) if selected_capability_ids else None,
+            )
             conn.commit()
             total_count = conn.execute(
                 "select count(*) from sp_capability_documents where status in ('active', 'approved')"
@@ -873,6 +1574,65 @@ class SemanticCatalogRepository:
                 "total_count": total_count,
                 "capability_ids": [document["capability_id"] for document in documents],
             }
+
+    def _rebuild_capability_documents_in_conn(
+        self,
+        conn: Any,
+        capability_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        catalog = self._catalog_from_conn(conn)
+        selected_capability_ids = {str(value) for value in (capability_ids or []) if str(value or "")}
+        documents = []
+        for capability_id, capability in catalog.get("capabilities", {}).items():
+            if selected_capability_ids and str(capability_id) not in selected_capability_ids:
+                continue
+            document = _capability_document_from_capability(capability_id, capability, catalog)
+            row = conn.execute(
+                """
+                insert into sp_capability_documents(id, capability_id, document_text, aliases, examples,
+                                                    intent_patterns, semantic_entities, planning_hints,
+                                                    inputs, outputs, tags, embedding_model, embedding,
+                                                    vector_status, status, provenance, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                on conflict (id) do update set
+                    document_text = excluded.document_text,
+                    aliases = excluded.aliases,
+                    examples = excluded.examples,
+                    intent_patterns = excluded.intent_patterns,
+                    semantic_entities = excluded.semantic_entities,
+                    planning_hints = excluded.planning_hints,
+                    inputs = excluded.inputs,
+                    outputs = excluded.outputs,
+                    tags = excluded.tags,
+                    embedding_model = excluded.embedding_model,
+                    embedding = excluded.embedding,
+                    vector_status = excluded.vector_status,
+                    status = excluded.status,
+                    provenance = excluded.provenance,
+                    updated_at = now()
+                returning *
+                """,
+                (
+                    document["id"],
+                    document["capability_id"],
+                    document["document_text"],
+                    _jsonb(document.get("aliases", [])),
+                    _jsonb(document.get("examples", [])),
+                    _jsonb(document.get("intent_patterns", [])),
+                    _jsonb(document.get("semantic_entities", [])),
+                    _jsonb(document.get("planning_hints", {})),
+                    _jsonb(document.get("inputs", [])),
+                    _jsonb(document.get("outputs", [])),
+                    _jsonb(document.get("tags", [])),
+                    document.get("embedding_model"),
+                    _jsonb(document.get("embedding")) if document.get("embedding") is not None else None,
+                    document.get("vector_status", "not_embedded"),
+                    document.get("status", "active"),
+                    _jsonb(document.get("provenance", {})),
+                ),
+            ).fetchone()
+            documents.append(dict(row))
+        return documents
 
     def embed_capability_documents(
         self,
@@ -1156,6 +1916,229 @@ class SemanticCatalogRepository:
             ).fetchall()
             return {"execution_graphs": [dict(row) for row in rows]}
 
+    def catalog_versions(self, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+        self.ensure_schema()
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        with self.connect() as conn:
+            total = conn.execute("select count(*)::int as count from sp_catalog_versions").fetchone()["count"]
+            rows = conn.execute(
+                """
+                select id, version_number, status, reason, proposal_id, snapshot_sha256,
+                       counts, metadata, created_by, created_at
+                from sp_catalog_versions
+                order by version_number desc
+                limit %s offset %s
+                """,
+                (limit, offset),
+            ).fetchall()
+        return {
+            "catalog_versions": [dict(row) for row in rows],
+            "total": int(total),
+            "limit": limit,
+            "offset": offset,
+            "next_offset": offset + limit if offset + limit < int(total) else None,
+        }
+
+    def catalog_version(self, version_id: str) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                "select * from sp_catalog_versions where id = %s",
+                (version_id,),
+            ).fetchone()
+            if not row:
+                raise FileNotFoundError(version_id)
+            return {"catalog_version": dict(row)}
+
+    def catalog_version_diff(self, version_id: str, base_version_id: str | None = None) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            target = conn.execute("select * from sp_catalog_versions where id = %s", (version_id,)).fetchone()
+            if not target:
+                raise FileNotFoundError(version_id)
+            if base_version_id:
+                base = conn.execute("select * from sp_catalog_versions where id = %s", (base_version_id,)).fetchone()
+            else:
+                base = conn.execute(
+                    """
+                    select *
+                    from sp_catalog_versions
+                    where version_number < %s
+                    order by version_number desc
+                    limit 1
+                    """,
+                    (target["version_number"],),
+                ).fetchone()
+            if not base:
+                return {
+                    "base_version": None,
+                    "target_version": _catalog_version_summary(dict(target)),
+                    "diff": _catalog_snapshot_diff({}, target.get("snapshot") or {}),
+                }
+            return {
+                "base_version": _catalog_version_summary(dict(base)),
+                "target_version": _catalog_version_summary(dict(target)),
+                "diff": _catalog_snapshot_diff(base.get("snapshot") or {}, target.get("snapshot") or {}),
+            }
+
+    def restore_catalog_version(self, version_id: str, *, restored_by: str = "system") -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            target = conn.execute(
+                """
+                select id, version_number, status, reason, proposal_id, snapshot_sha256,
+                       snapshot, counts, metadata, created_by, created_at
+                from sp_catalog_versions
+                where id = %s
+                """,
+                (version_id,),
+            ).fetchone()
+            if not target:
+                raise FileNotFoundError(version_id)
+            target_version = dict(target)
+            target_snapshot = _catalog_version_snapshot(target_version.get("snapshot") or {})
+            current_snapshot = _catalog_version_snapshot(self._catalog_from_conn(conn))
+            diff = _catalog_snapshot_diff(current_snapshot, target_snapshot)
+            self._restore_catalog_snapshot(conn, target_snapshot)
+            capability_ids = sorted(_snapshot_section_items(target_snapshot.get("capabilities")).keys())
+            conn.execute("delete from sp_capability_documents")
+            if capability_ids:
+                self._rebuild_capability_documents_in_conn(conn, capability_ids=capability_ids)
+            restored_version = self._create_catalog_version(
+                conn,
+                reason="version_restore",
+                created_by=restored_by,
+                metadata={
+                    "restored_from_version_id": target_version.get("id"),
+                    "restored_from_version_number": target_version.get("version_number"),
+                    "restore_diff": diff.get("counts") or {},
+                },
+                allow_duplicate_snapshot=True,
+            )
+            conn.commit()
+            return {
+                "restored_from": _catalog_version_summary(target_version),
+                "catalog_version": restored_version.get("catalog_version"),
+                "created": restored_version.get("created"),
+                "diff": diff,
+            }
+
+    def create_catalog_version(
+        self,
+        *,
+        reason: str,
+        proposal_id: str | None = None,
+        created_by: str = "system",
+        metadata: dict[str, Any] | None = None,
+        allow_duplicate_snapshot: bool = False,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            result = self._create_catalog_version(
+                conn,
+                reason=reason,
+                proposal_id=proposal_id,
+                created_by=created_by,
+                metadata=metadata,
+                allow_duplicate_snapshot=allow_duplicate_snapshot,
+            )
+            conn.commit()
+            return result
+
+    def _restore_catalog_snapshot(self, conn: Any, snapshot: dict[str, Any]) -> None:
+        specs = _catalog_section_specs()
+        for section in CATALOG_VERSION_RESTORE_DELETE_ORDER:
+            spec = specs[section]
+            table = spec["table"]
+            key = spec["key"]
+            item_ids = sorted(_snapshot_section_items(snapshot.get(section)).keys())
+            conn.execute(f"delete from {table} where {key} <> all(%s)", (item_ids,))
+        apply_methods = {
+            "semantic_types": self._apply_semantic_type,
+            "entities": self._apply_entity,
+            "entity_identifiers": self._apply_entity_identifier,
+            "semantic_join_rules": self._apply_semantic_join_rule,
+            "capabilities": self._apply_capability,
+            "capability_entity_links": self._apply_capability_entity_link,
+            "capability_dependencies": self._apply_capability_dependency,
+            "planning_examples": self._apply_planning_example,
+            "resources": self._apply_resource,
+            "operations": self._apply_operation,
+            "operation_fields": self._apply_operation_field,
+            "operation_contracts": self._apply_operation_contract,
+            "operation_variants": self._apply_operation_variant,
+            "field_mappings": self._apply_field_mapping,
+            "capability_implementations": self._apply_capability_implementation,
+        }
+        for section in CATALOG_VERSION_RESTORE_APPLY_ORDER:
+            for item in _snapshot_section_items(snapshot.get(section)).values():
+                if isinstance(item, dict):
+                    apply_methods[section](conn, item)
+
+    def _create_catalog_version(
+        self,
+        conn: Any,
+        *,
+        reason: str,
+        proposal_id: str | None = None,
+        created_by: str = "system",
+        metadata: dict[str, Any] | None = None,
+        allow_duplicate_snapshot: bool = False,
+    ) -> dict[str, Any]:
+        full_catalog = self._catalog_from_conn(conn)
+        snapshot = _catalog_version_snapshot(full_catalog)
+        counts = _catalog_snapshot_counts(snapshot)
+        snapshot_payload = _stable_json(snapshot)
+        snapshot_sha256 = hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()
+        version_metadata = {
+            **(metadata or {}),
+            "snapshot_scope": CATALOG_VERSION_SCOPE,
+            "snapshot_sections": list(CATALOG_VERSION_SECTIONS),
+            "excluded_sections": sorted(set(full_catalog) - set(CATALOG_VERSION_SECTIONS)),
+        }
+        if not allow_duplicate_snapshot:
+            existing = conn.execute(
+                """
+                select id, version_number, status, reason, proposal_id, snapshot_sha256,
+                       counts, metadata, created_by, created_at
+                from sp_catalog_versions
+                where snapshot_sha256 = %s
+                order by version_number desc
+                limit 1
+                """,
+                (snapshot_sha256,),
+            ).fetchone()
+            if existing:
+                return {"catalog_version": dict(existing), "created": False, "reason": "snapshot_unchanged"}
+        next_number = conn.execute(
+            "select coalesce(max(version_number), 0) + 1 as version_number from sp_catalog_versions"
+        ).fetchone()["version_number"]
+        version_number = int(next_number)
+        version_id = f"catalog_version.{version_number:06d}"
+        conn.execute("update sp_catalog_versions set status = 'archived' where status = 'active'")
+        row = conn.execute(
+            """
+            insert into sp_catalog_versions(id, version_number, status, reason, proposal_id,
+                                            snapshot, snapshot_sha256, counts, metadata, created_by)
+            values (%s, %s, 'active', %s, %s, %s, %s, %s, %s, %s)
+            returning id, version_number, status, reason, proposal_id, snapshot_sha256,
+                      counts, metadata, created_by, created_at
+            """,
+            (
+                version_id,
+                version_number,
+                reason,
+                proposal_id,
+                _jsonb(snapshot),
+                snapshot_sha256,
+                _jsonb(counts),
+                _jsonb(version_metadata),
+                created_by,
+            ),
+        ).fetchone()
+        return {"catalog_version": dict(row), "created": True}
+
     def record_planner_feedback(self, feedback: dict[str, Any]) -> dict[str, Any]:
         self.ensure_schema()
         with self.connect() as conn:
@@ -1348,6 +2331,12 @@ class SemanticCatalogRepository:
                 )
                 self._insert_lineage(conn, item_type, payload, proposal_id, item)
                 applied.append({"item_type": item_type, "target_id": item["target_id"]})
+            capability_ids = _proposal_capability_ids(items, applied)
+            rebuilt_documents = (
+                self._rebuild_capability_documents_in_conn(conn, capability_ids=capability_ids)
+                if capability_ids
+                else []
+            )
             conn.execute(
                 """
                 update sp_proposals
@@ -1357,7 +2346,17 @@ class SemanticCatalogRepository:
                 (proposal_id,),
             )
             conn.commit()
-            return {"proposal_id": proposal_id, "reviewer": reviewer, "applied": applied}
+            return {
+                "proposal_id": proposal_id,
+                "reviewer": reviewer,
+                "applied": applied,
+                "capability_documents": {
+                    "capability_documents": rebuilt_documents,
+                    "count": len(rebuilt_documents),
+                    "capability_ids": [document["capability_id"] for document in rebuilt_documents],
+                },
+                "catalog_version": None,
+            }
 
     def _validate_capability_proposal_items(self, items: list[dict[str, Any]]) -> None:
         capability_ids = {
@@ -1510,245 +2509,248 @@ class SemanticCatalogRepository:
     def catalog(self) -> dict[str, Any]:
         self.ensure_schema()
         with self.connect() as conn:
-            capabilities = _rows_by_id(
-                conn.execute("select * from sp_capabilities where status in ('active', 'approved') order by id").fetchall()
-            )
-            capability_ids = set(capabilities)
-            capability_documents = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_capability_documents
-                    where status in ('active', 'approved') and capability_id = any(%s)
-                    order by id
-                    """,
-                    (list(capability_ids),),
-                ).fetchall()
-            )
-            operation_variants = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_operation_variants
-                    where status = 'approved' and capability_id = any(%s)
-                    order by variant_id
-                    """,
-                    (list(capability_ids),),
-                ).fetchall(),
-                key="variant_id",
-            )
-            capability_implementations = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    select * from sp_capability_implementations
-                    where capability_id = any(%s) and status in ('active', 'approved', 'planned')
-                    order by capability_id, operation_id
-                    """,
-                    (list(capability_ids),),
-                ).fetchall()
-            ]
-            operation_ids = {
-                str(item.get("operation_id") or "")
-                for item in [*operation_variants.values(), *capability_implementations]
-                if item.get("operation_id")
-            }
-            operation_contracts = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_operation_contracts
-                    where status = 'approved'
-                      and (capability_id = any(%s) or operation_id = any(%s))
-                    order by operation_id
-                    """,
-                    (list(capability_ids), list(operation_ids)),
-                ).fetchall(),
-                key="operation_id",
-            )
-            operation_ids.update(str(item.get("operation_id") or "") for item in operation_contracts.values())
-            operations = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_operations
-                    where status in ('active', 'approved') and operation_id = any(%s)
-                    order by operation_id
-                    """,
-                    (list(operation_ids),),
-                ).fetchall(),
-                key="operation_id",
-            )
-            resource_ids = {
-                str(item.get("resource_id") or "")
-                for item in [*operations.values(), *operation_contracts.values()]
-                if item.get("resource_id")
-            }
-            semantic_type_ids = {
-                str(value)
-                for capability in capabilities.values()
-                for value in [*_json_list(capability.get("inputs")), *_json_list(capability.get("outputs"))]
-            }
-            for contract in operation_contracts.values():
-                semantic_type_ids.update(_semantic_types_from_payload_contract(contract.get("request")))
-                semantic_type_ids.update(_semantic_types_from_payload_contract(contract.get("response")))
-            field_mappings = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_field_mappings
-                    where status = 'approved'
-                      and operation_id = any(%s)
-                      and semantic_type_id = any(%s)
-                    order by id
-                    """,
-                    (list(operation_ids), list(semantic_type_ids)),
-                ).fetchall()
-            )
-            semantic_type_ids.update(str(row.get("semantic_type_id") or "") for row in field_mappings.values())
-            semantic_type_ids.discard("")
-            capability_entity_links = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_capability_entity_links
-                    where status in ('active', 'approved') and capability_id = any(%s)
-                    order by capability_id, role, entity_id
-                    """,
-                    (list(capability_ids),),
-                ).fetchall()
-            )
-            capability_dependencies = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_capability_dependencies
-                    where status in ('active', 'approved') and capability_id = any(%s)
-                    order by capability_id, dependency_type, depends_on_capability_id
-                    """,
-                    (list(capability_ids),),
-                ).fetchall()
-            )
-            entity_ids = {
-                str(row.get("entity_id") or "")
-                for row in capability_entity_links.values()
-                if row.get("entity_id")
-            }
-            semantic_type_ids.update(
-                str(row.get("semantic_type_id") or "")
-                for row in capability_entity_links.values()
-                if row.get("semantic_type_id")
-            )
-            semantic_type_ids.update(
-                str(row.get("semantic_type_id") or "")
-                for row in capability_dependencies.values()
-                if row.get("semantic_type_id")
-            )
-            operation_field_ids = {
-                str(row.get("operation_field_id") or "")
-                for row in field_mappings.values()
-                if row.get("operation_field_id")
-            }
-            resources = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_resources
-                    where status in ('active', 'approved') and id = any(%s)
-                    order by id
-                    """,
-                    (list(resource_ids),),
-                ).fetchall()
-            )
-            semantic_types = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_semantic_types
-                    where status in ('active', 'approved') and id = any(%s)
-                    order by id
-                    """,
-                    (list(semantic_type_ids),),
-                ).fetchall()
-            )
-            entity_identifiers = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_entity_identifiers
-                    where status in ('active', 'approved')
-                      and (
-                        (%s::text[] <> '{}'::text[] and entity_id = any(%s))
-                        or (%s::text[] <> '{}'::text[] and semantic_type_id = any(%s))
-                      )
-                    order by entity_id, semantic_type_id
-                    """,
-                    (list(entity_ids), list(entity_ids), list(semantic_type_ids), list(semantic_type_ids)),
-                ).fetchall()
-            )
-            entity_ids.update(
-                str(row.get("entity_id") or "")
-                for row in entity_identifiers.values()
-                if row.get("entity_id")
-            )
-            entities = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_entities
-                    where status in ('active', 'approved') and id = any(%s)
-                    order by id
-                    """,
-                    (list(entity_ids),),
-                ).fetchall()
-            )
-            semantic_join_rules = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_semantic_join_rules
-                    where status in ('active', 'approved')
-                      and (
-                        from_semantic_type_id = any(%s)
-                        or to_semantic_type_id = any(%s)
-                        or from_entity_id = any(%s)
-                        or to_entity_id = any(%s)
-                      )
-                    order by id
-                    """,
-                    (list(semantic_type_ids), list(semantic_type_ids), list(entity_ids), list(entity_ids)),
-                ).fetchall()
-            )
-            planning_examples = _rows_by_id(
-                conn.execute(
-                    """
-                    select * from sp_planning_examples
-                    where status in ('active', 'approved')
-                      and (%s::text[] = '{}'::text[] or expected_capability_ids && %s::text[])
-                    order by updated_at desc, id
-                    limit 200
-                    """,
-                    (list(capability_ids), list(capability_ids)),
-                ).fetchall()
-            )
-            operation_fields = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    select * from sp_operation_fields
-                    where operation_id = any(%s)
-                      and (%s::text[] = '{}'::text[] or id = any(%s))
-                    order by operation_id, direction, raw_name
-                    """,
-                    (list(operation_ids), list(operation_field_ids), list(operation_field_ids)),
-                ).fetchall()
-            ]
-            return {
-                "semantic_types": semantic_types,
-                "entities": entities,
-                "entity_identifiers": entity_identifiers,
-                "semantic_join_rules": semantic_join_rules,
-                "capabilities": capabilities,
-                "capability_documents": capability_documents,
-                "capability_entity_links": capability_entity_links,
-                "capability_dependencies": capability_dependencies,
-                "planning_examples": planning_examples,
-                "resources": resources,
-                "operations": operations,
-                "operation_fields": operation_fields,
-                "operation_variants": operation_variants,
-                "field_mappings": field_mappings,
-                "operation_contracts": operation_contracts,
-                "capability_implementations": capability_implementations,
-            }
+            return self._catalog_from_conn(conn)
+
+    def _catalog_from_conn(self, conn: Any) -> dict[str, Any]:
+        capabilities = _rows_by_id(
+            conn.execute("select * from sp_capabilities where status in ('active', 'approved') order by id").fetchall()
+        )
+        capability_ids = set(capabilities)
+        capability_documents = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_capability_documents
+                where status in ('active', 'approved') and capability_id = any(%s)
+                order by id
+                """,
+                (list(capability_ids),),
+            ).fetchall()
+        )
+        operation_variants = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_operation_variants
+                where status = 'approved' and capability_id = any(%s)
+                order by variant_id
+                """,
+                (list(capability_ids),),
+            ).fetchall(),
+            key="variant_id",
+        )
+        capability_implementations = [
+            dict(row)
+            for row in conn.execute(
+                """
+                select * from sp_capability_implementations
+                where capability_id = any(%s) and status in ('active', 'approved', 'planned')
+                order by capability_id, operation_id
+                """,
+                (list(capability_ids),),
+            ).fetchall()
+        ]
+        operation_ids = {
+            str(item.get("operation_id") or "")
+            for item in [*operation_variants.values(), *capability_implementations]
+            if item.get("operation_id")
+        }
+        operation_contracts = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_operation_contracts
+                where status = 'approved'
+                  and (capability_id = any(%s) or operation_id = any(%s))
+                order by operation_id
+                """,
+                (list(capability_ids), list(operation_ids)),
+            ).fetchall(),
+            key="operation_id",
+        )
+        operation_ids.update(str(item.get("operation_id") or "") for item in operation_contracts.values())
+        operations = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_operations
+                where status in ('active', 'approved') and operation_id = any(%s)
+                order by operation_id
+                """,
+                (list(operation_ids),),
+            ).fetchall(),
+            key="operation_id",
+        )
+        resource_ids = {
+            str(item.get("resource_id") or "")
+            for item in [*operations.values(), *operation_contracts.values()]
+            if item.get("resource_id")
+        }
+        semantic_type_ids = {
+            str(value)
+            for capability in capabilities.values()
+            for value in [*_json_list(capability.get("inputs")), *_json_list(capability.get("outputs"))]
+        }
+        for contract in operation_contracts.values():
+            semantic_type_ids.update(_semantic_types_from_payload_contract(contract.get("request")))
+            semantic_type_ids.update(_semantic_types_from_payload_contract(contract.get("response")))
+        field_mappings = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_field_mappings
+                where status = 'approved'
+                  and operation_id = any(%s)
+                  and semantic_type_id = any(%s)
+                order by id
+                """,
+                (list(operation_ids), list(semantic_type_ids)),
+            ).fetchall()
+        )
+        semantic_type_ids.update(str(row.get("semantic_type_id") or "") for row in field_mappings.values())
+        semantic_type_ids.discard("")
+        capability_entity_links = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_capability_entity_links
+                where status in ('active', 'approved') and capability_id = any(%s)
+                order by capability_id, role, entity_id
+                """,
+                (list(capability_ids),),
+            ).fetchall()
+        )
+        capability_dependencies = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_capability_dependencies
+                where status in ('active', 'approved') and capability_id = any(%s)
+                order by capability_id, dependency_type, depends_on_capability_id
+                """,
+                (list(capability_ids),),
+            ).fetchall()
+        )
+        entity_ids = {
+            str(row.get("entity_id") or "")
+            for row in capability_entity_links.values()
+            if row.get("entity_id")
+        }
+        semantic_type_ids.update(
+            str(row.get("semantic_type_id") or "")
+            for row in capability_entity_links.values()
+            if row.get("semantic_type_id")
+        )
+        semantic_type_ids.update(
+            str(row.get("semantic_type_id") or "")
+            for row in capability_dependencies.values()
+            if row.get("semantic_type_id")
+        )
+        operation_field_ids = {
+            str(row.get("operation_field_id") or "")
+            for row in field_mappings.values()
+            if row.get("operation_field_id")
+        }
+        resources = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_resources
+                where status in ('active', 'approved') and id = any(%s)
+                order by id
+                """,
+                (list(resource_ids),),
+            ).fetchall()
+        )
+        semantic_types = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_semantic_types
+                where status in ('active', 'approved') and id = any(%s)
+                order by id
+                """,
+                (list(semantic_type_ids),),
+            ).fetchall()
+        )
+        entity_identifiers = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_entity_identifiers
+                where status in ('active', 'approved')
+                  and (
+                    (%s::text[] <> '{}'::text[] and entity_id = any(%s))
+                    or (%s::text[] <> '{}'::text[] and semantic_type_id = any(%s))
+                  )
+                order by entity_id, semantic_type_id
+                """,
+                (list(entity_ids), list(entity_ids), list(semantic_type_ids), list(semantic_type_ids)),
+            ).fetchall()
+        )
+        entity_ids.update(
+            str(row.get("entity_id") or "")
+            for row in entity_identifiers.values()
+            if row.get("entity_id")
+        )
+        entities = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_entities
+                where status in ('active', 'approved') and id = any(%s)
+                order by id
+                """,
+                (list(entity_ids),),
+            ).fetchall()
+        )
+        semantic_join_rules = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_semantic_join_rules
+                where status in ('active', 'approved')
+                  and (
+                    from_semantic_type_id = any(%s)
+                    or to_semantic_type_id = any(%s)
+                    or from_entity_id = any(%s)
+                    or to_entity_id = any(%s)
+                  )
+                order by id
+                """,
+                (list(semantic_type_ids), list(semantic_type_ids), list(entity_ids), list(entity_ids)),
+            ).fetchall()
+        )
+        planning_examples = _rows_by_id(
+            conn.execute(
+                """
+                select * from sp_planning_examples
+                where status in ('active', 'approved')
+                  and (%s::text[] = '{}'::text[] or expected_capability_ids && %s::text[])
+                order by updated_at desc, id
+                limit 200
+                """,
+                (list(capability_ids), list(capability_ids)),
+            ).fetchall()
+        )
+        operation_fields = [
+            dict(row)
+            for row in conn.execute(
+                """
+                select * from sp_operation_fields
+                where operation_id = any(%s)
+                  and (%s::text[] = '{}'::text[] or id = any(%s))
+                order by operation_id, direction, raw_name
+                """,
+                (list(operation_ids), list(operation_field_ids), list(operation_field_ids)),
+            ).fetchall()
+        ]
+        return {
+            "semantic_types": semantic_types,
+            "entities": entities,
+            "entity_identifiers": entity_identifiers,
+            "semantic_join_rules": semantic_join_rules,
+            "capabilities": capabilities,
+            "capability_documents": capability_documents,
+            "capability_entity_links": capability_entity_links,
+            "capability_dependencies": capability_dependencies,
+            "planning_examples": planning_examples,
+            "resources": resources,
+            "operations": operations,
+            "operation_fields": operation_fields,
+            "operation_variants": operation_variants,
+            "field_mappings": field_mappings,
+            "operation_contracts": operation_contracts,
+            "capability_implementations": capability_implementations,
+        }
 
     def catalog_section(self, section: str, limit: int = 100, offset: int = 0, q: str | None = None) -> dict[str, Any]:
         self.ensure_schema()
@@ -1793,6 +2795,93 @@ class SemanticCatalogRepository:
             "total": total_count,
             "items": items,
         }
+
+    def update_catalog_item(self, section: str, item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_schema()
+        allowed = _governance_catalog_specs()
+        if section not in allowed:
+            raise KeyError(section)
+        spec = allowed[section]
+        key = spec["key"]
+        document = dict(payload)
+        document[key] = item_id
+        with self.connect() as conn:
+            existing = _catalog_item_row(conn, spec, item_id)
+            if not existing:
+                raise FileNotFoundError(item_id)
+            spec["apply"](self, conn, document)
+            updated = _catalog_item_row(conn, spec, item_id)
+            conn.commit()
+        return {"section": section, "id": item_id, "item": updated, "catalog_version": None}
+
+    def catalog_item_delete_plan(self, section: str, item_id: str) -> dict[str, Any]:
+        self.ensure_schema()
+        allowed = _governance_catalog_specs()
+        if section not in allowed:
+            raise KeyError(section)
+        spec = allowed[section]
+        with self.connect() as conn:
+            existing = _catalog_item_row(conn, spec, item_id)
+            if not existing:
+                raise FileNotFoundError(item_id)
+            blockers = _catalog_delete_blockers(conn, section, item_id)
+        blocker_count = sum(int(item.get("count") or 0) for item in blockers)
+        modes = []
+        if spec.get("deprecate"):
+            modes.append({"mode": "deprecate", "label": "Deprecate", "destructive": False})
+        if blocker_count == 0:
+            modes.append({"mode": "delete", "label": "Delete", "destructive": True})
+        return {
+            "section": section,
+            "id": item_id,
+            "item": existing,
+            "blockers": blockers,
+            "blocker_count": blocker_count,
+            "modes": modes,
+            "default_mode": "deprecate" if spec.get("deprecate") else "delete",
+        }
+
+    def delete_catalog_item(self, section: str, item_id: str, *, mode: str = "deprecate") -> dict[str, Any]:
+        self.ensure_schema()
+        allowed = _governance_catalog_specs()
+        if section not in allowed:
+            raise KeyError(section)
+        spec = allowed[section]
+        mode = str(mode or ("deprecate" if spec.get("deprecate") else "delete"))
+        plan = self.catalog_item_delete_plan(section, item_id)
+        blocker_count = int(plan.get("blocker_count") or 0)
+        if mode == "deprecate":
+            if not spec.get("deprecate"):
+                raise ValueError(f"{section} does not support deprecate")
+            with self.connect() as conn:
+                conn.execute(
+                    f"update {spec['table']} set status = 'deprecated', updated_at = now() where {spec['key']} = %s",
+                    (item_id,),
+                )
+                conn.commit()
+            return {
+                "section": section,
+                "id": item_id,
+                "mode": "deprecate",
+                "status": "deprecated",
+                "plan": plan,
+                "catalog_version": None,
+            }
+        if mode == "delete":
+            if blocker_count:
+                raise ValueError("catalog item has dependent objects; deprecate it or remove dependencies first")
+            with self.connect() as conn:
+                conn.execute(f"delete from {spec['table']} where {spec['key']} = %s", (item_id,))
+                conn.commit()
+            return {
+                "section": section,
+                "id": item_id,
+                "mode": "delete",
+                "status": "deleted",
+                "plan": plan,
+                "catalog_version": None,
+            }
+        raise ValueError("mode must be deprecate or delete")
 
     def execution_contracts(self) -> dict[str, Any]:
         catalog = self.catalog()
@@ -1859,19 +2948,52 @@ class SemanticCatalogRepository:
             },
         }
 
-    def proposals(self) -> dict[str, Any]:
+    def proposals(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
         self.ensure_schema()
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        where = ["true"]
+        params: list[Any] = []
+        if status:
+            where.append("proposal.status = %s")
+            params.append(status)
+        where_sql = " and ".join(where)
+        payload_sql = ", proposal.payload" if include_payload else ""
         with self.connect() as conn:
+            total = conn.execute(
+                f"select count(*)::int as count from sp_proposals proposal where {where_sql}",
+                params,
+            ).fetchone()["count"]
             proposals = conn.execute(
-                """
-                select proposal.*, count(item.id)::int as item_count
+                f"""
+                select proposal.id, proposal.source_document_id, proposal.kind, proposal.status,
+                       proposal.created_by, proposal.created_at, proposal.reviewed_at
+                       {payload_sql},
+                       count(item.id)::int as item_count
                 from sp_proposals proposal
                 left join sp_proposal_items item on item.proposal_id = proposal.id
+                where {where_sql}
                 group by proposal.id
                 order by proposal.created_at desc
+                limit %s offset %s
                 """
+                ,
+                [*params, limit, offset],
             ).fetchall()
-            return {"proposals": [dict(row) for row in proposals]}
+            return {
+                "proposals": [dict(row) for row in proposals],
+                "total": int(total),
+                "limit": limit,
+                "offset": offset,
+                "next_offset": offset + limit if offset + limit < int(total) else None,
+            }
 
     def proposal(self, proposal_id: str) -> dict[str, Any]:
         self.ensure_schema()
@@ -1885,11 +3007,187 @@ class SemanticCatalogRepository:
             ).fetchall()
             return {"proposal": dict(proposal), "items": [dict(row) for row in items]}
 
+    def update_proposal_item(
+        self,
+        proposal_id: str,
+        item_id: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.ensure_schema()
+        with self.connect() as conn:
+            proposal = conn.execute("select * from sp_proposals where id = %s", (proposal_id,)).fetchone()
+            if not proposal:
+                raise FileNotFoundError(proposal_id)
+            if proposal["status"] != "pending_review":
+                raise ValueError("only pending_review proposals can be edited")
+            item = conn.execute(
+                "select * from sp_proposal_items where proposal_id = %s and id = %s",
+                (proposal_id, item_id),
+            ).fetchone()
+            if not item:
+                raise FileNotFoundError(item_id)
+            current = dict(item)
+            if current.get("status") != "pending_review":
+                raise ValueError("only pending_review proposal items can be edited")
+            next_payload = payload if payload is not None else current.get("payload", {})
+            self._validate_proposal_item_payload_edit(current, next_payload)
+            updated = conn.execute(
+                """
+                update sp_proposal_items
+                set payload = %s
+                where proposal_id = %s and id = %s
+                returning *
+                """,
+                (_jsonb(next_payload), proposal_id, item_id),
+            ).fetchone()
+            conn.commit()
+            return {"proposal": dict(proposal), "item": dict(updated)}
+
+    def _validate_proposal_item_payload_edit(self, item: dict[str, Any], payload: dict[str, Any]) -> None:
+        if not payload or not isinstance(payload, dict):
+            raise ValueError("payload must be a JSON object")
+        item_type = str(item.get("item_type") or "")
+        current_payload = item.get("payload") or {}
+        editable_paths = _proposal_editable_payload_paths(item_type)
+        if not editable_paths:
+            if not _json_equal(current_payload, payload):
+                raise ValueError(f"proposal item type is read-only: {item_type}")
+            return
+        identity_key = _proposal_payload_identity_key(item_type)
+        if identity_key:
+            current_identity = str(current_payload.get(identity_key) or "")
+            next_identity = str(payload.get(identity_key) or "")
+            if current_identity and next_identity != current_identity:
+                raise ValueError(f"payload identity field is read-only: {identity_key}")
+        target_id = str(item.get("target_id") or "")
+        next_identity = str(payload.get(identity_key) or "") if identity_key else ""
+        if target_id and next_identity and next_identity != target_id:
+            raise ValueError("payload identity must match proposal item target_id")
+        changed_paths = _json_changed_paths(current_payload, payload)
+        blocked_paths = [
+            ".".join(path)
+            for path in changed_paths
+            if not _path_allowed(path, editable_paths)
+        ]
+        if blocked_paths:
+            raise ValueError(f"proposal payload fields are read-only: {', '.join(blocked_paths)}")
+
     def sources(self) -> dict[str, Any]:
         self.ensure_schema()
         with self.connect() as conn:
-            rows = conn.execute("select * from sp_source_documents order by updated_at desc").fetchall()
-            return {"sources": [dict(row) for row in rows]}
+            registry_rows = conn.execute(
+                """
+                select source.*,
+                       revision.id as revision_id,
+                       revision.revision_number,
+                       revision.file_name,
+                       revision.content_type,
+                       revision.size_bytes,
+                       revision.sha256,
+                       revision.object_uri,
+                       revision.created_at as revision_created_at
+                from sp_sources source
+                left join sp_source_revisions revision on revision.id = source.current_revision_id
+                order by source.updated_at desc
+                """
+            ).fetchall()
+            legacy_rows = conn.execute(
+                """
+                select document.*
+                from sp_source_documents document
+                where not exists (
+                    select 1
+                    from sp_sources source
+                    where source.id = document.id
+                )
+                order by document.updated_at desc
+                """
+            ).fetchall()
+            sources = [
+                {
+                    **dict(row),
+                    "source_kind": "registry",
+                    "catalog_status": self._catalog_status_for_source(conn, row["id"], row.get("sha256")),
+                }
+                for row in registry_rows
+            ]
+            sources.extend(
+                {
+                    **dict(row),
+                    "title": (row.get("metadata") or {}).get("title") or row.get("file_name") or row.get("path"),
+                    "source_kind": "legacy_document",
+                    "catalog_status": self._catalog_status_for_source(conn, row["id"], row.get("sha256")),
+                }
+                for row in legacy_rows
+            )
+            return {"sources": sources}
+
+    def _catalog_status_for_source(self, conn: Any, source_id: str, sha256: str | None = None) -> str:
+        document = conn.execute("select sha256 from sp_source_documents where id = %s", (source_id,)).fetchone()
+        if document and sha256 and document.get("sha256") != sha256:
+            return "stale"
+        proposal_statuses = conn.execute(
+            """
+            select proposal.status, count(proposal.id)::int as count
+            from sp_proposals proposal
+            where proposal.source_document_id = %s
+              and exists (
+                select 1
+                from sp_proposal_items item
+                where item.proposal_id = proposal.id
+              )
+            group by proposal.status
+            """,
+            (source_id,),
+        ).fetchall()
+        if not proposal_statuses:
+            empty_proposal_count = conn.execute(
+                """
+                select count(*)::int as count
+                from sp_proposals proposal
+                where proposal.source_document_id = %s
+                  and not exists (
+                    select 1
+                    from sp_proposal_items item
+                    where item.proposal_id = proposal.id
+                  )
+                """,
+                (source_id,),
+            ).fetchone()["count"]
+            if int(empty_proposal_count or 0) > 0:
+                return "ingestion_empty"
+            return "not_ingested"
+        counts = {str(row["status"]): int(row["count"]) for row in proposal_statuses}
+        if counts.get("pending_review") or counts.get("planned"):
+            return "proposal_pending"
+        active_capabilities = conn.execute(
+            """
+            select count(*)::int as count
+            from sp_capabilities
+            where provenance->>'source_document_id' = %s
+              and status in ('active', 'approved')
+            """,
+            (source_id,),
+        ).fetchone()["count"]
+        if int(active_capabilities) == 0:
+            return "proposal_rejected"
+        try:
+            embedded = conn.execute(
+                """
+                select count(*)::int as count
+                from sp_capability_document_vectors vector
+                join sp_capability_documents document on document.id = vector.document_id
+                join sp_capabilities capability on capability.id = document.capability_id
+                where capability.provenance->>'source_document_id' = %s
+                  and capability.status in ('active', 'approved')
+                """,
+                (source_id,),
+            ).fetchone()["count"]
+        except Exception:
+            conn.rollback()
+            embedded = 0
+        return "ready" if int(embedded) > 0 else "cataloged"
 
     def source_ingestion_status(self, source_document_id: str, sha256: str | None = None) -> dict[str, Any]:
         self.ensure_schema()
@@ -1958,6 +3256,9 @@ class SemanticCatalogRepository:
     def meta(self) -> dict[str, Any]:
         self.ensure_schema()
         tables = [
+            "sp_sources",
+            "sp_source_revisions",
+            "sp_secrets",
             "sp_source_documents",
             "sp_source_chunks",
             "sp_source_evidence_snapshots",
@@ -1979,7 +3280,9 @@ class SemanticCatalogRepository:
             "sp_planning_examples",
             "sp_endpoint_checks",
             "sp_execution_graphs",
+            "sp_ingestion_runs",
             "sp_planner_feedback",
+            "sp_catalog_versions",
             "sp_proposals",
         ]
         with self.connect() as conn:
@@ -1990,7 +3293,15 @@ class SemanticCatalogRepository:
                 except Exception:
                     conn.rollback()
                     counts[table.removeprefix("sp_")] = 0
-            return {"storage": "postgres", "counts": counts, "generated_at": _now_iso()}
+            return {
+                "storage": "postgres",
+                "counts": counts,
+                "generated_at": _now_iso(),
+                "llm": {
+                    "mode": llm_mode(),
+                    "openai_api_key_configured": bool(os.getenv("OPENAI_API_KEY")),
+                },
+            }
 
     def _apply_resource(self, conn: Any, payload: dict[str, Any]) -> None:
         conn.execute(
@@ -2538,6 +3849,116 @@ def _rows_by_id(rows: list[dict[str, Any]], key: str = "id") -> dict[str, dict[s
     return {str(row[key]): dict(row) for row in rows}
 
 
+def _proposal_payload_identity_key(item_type: str) -> str | None:
+    return {
+        "resource": "id",
+        "semantic_type": "id",
+        "entity": "id",
+        "entity_identifier": "id",
+        "capability": "id",
+        "capability_entity_link": "id",
+        "capability_dependency": "id",
+        "capability_document": "id",
+        "operation": "operation_id",
+        "operation_field": "id",
+        "operation_contract": "operation_id",
+        "operation_variant": "variant_id",
+        "field_mapping": "id",
+        "capability_implementation": "id",
+        "semantic_join_rule": "id",
+        "planning_example": "id",
+    }.get(item_type)
+
+
+def _proposal_capability_ids(items: list[dict[str, Any]], applied: list[dict[str, Any]]) -> list[str]:
+    capability_ids = {
+        str(item.get("target_id") or "")
+        for item in applied
+        if item.get("item_type") == "capability" and item.get("target_id")
+    }
+    for item in items:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+        for value in (
+            payload.get("capability_id"),
+            payload.get("capability"),
+            evidence.get("proposal_capability_id"),
+        ):
+            if value:
+                capability_ids.add(str(value))
+    capability_ids.discard("")
+    return sorted(capability_ids)
+
+
+def _proposal_editable_payload_paths(item_type: str) -> set[tuple[str, ...]]:
+    return {
+        "capability": {
+            ("description_ko",),
+            ("use_when",),
+            ("examples",),
+            ("provenance", "aliases"),
+            ("provenance", "examples"),
+            ("provenance", "intent_patterns"),
+            ("provenance", "planning_hints"),
+        },
+        "operation": {
+            ("name_ko",),
+            ("summary",),
+            ("description_ko",),
+        },
+        "operation_field": {
+            ("label_ko",),
+            ("description_ko",),
+            ("example",),
+            ("type_hint",),
+        },
+        "operation_contract": {
+            ("summary",),
+            ("description_ko",),
+        },
+        "operation_variant": {
+            ("name_ko",),
+            ("summary",),
+            ("description_ko",),
+        },
+        "field_mapping": {
+            ("semantic_type_id",),
+            ("transform",),
+            ("confidence",),
+        },
+        "planning_example": {
+            ("question",),
+            ("expected_arguments",),
+            ("expected_graph",),
+            ("tags",),
+        },
+    }.get(item_type, set())
+
+
+def _json_equal(left: Any, right: Any) -> bool:
+    return json.dumps(left, sort_keys=True, ensure_ascii=False, default=str) == json.dumps(
+        right,
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def _json_changed_paths(left: Any, right: Any, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    if _json_equal(left, right):
+        return []
+    if isinstance(left, dict) and isinstance(right, dict):
+        paths: list[tuple[str, ...]] = []
+        for key in sorted(set(left) | set(right)):
+            paths.extend(_json_changed_paths(left.get(key), right.get(key), (*prefix, str(key))))
+        return paths
+    return [prefix]
+
+
+def _path_allowed(path: tuple[str, ...], allowed_paths: set[tuple[str, ...]]) -> bool:
+    return any(path == allowed or path[: len(allowed)] == allowed for allowed in allowed_paths)
+
+
 def _semantic_catalog_tables() -> list[str]:
     return [
         "sp_proposal_items",
@@ -2546,6 +3967,7 @@ def _semantic_catalog_tables() -> list[str]:
         "sp_endpoint_checks",
         "sp_planner_feedback",
         "sp_execution_graphs",
+        "sp_catalog_versions",
         "sp_capability_document_vectors",
         "sp_capability_documents",
         "sp_capability_implementations",
@@ -2686,8 +4108,198 @@ def _catalog_section_specs() -> dict[str, dict[str, Any]]:
     }
 
 
+def _governance_catalog_specs() -> dict[str, dict[str, Any]]:
+    specs = _catalog_section_specs()
+    return {
+        "planning_examples": {
+            **specs["planning_examples"],
+            "deprecate": False,
+            "apply": SemanticCatalogRepository._apply_planning_example,
+        },
+        "capabilities": {
+            **specs["capabilities"],
+            "deprecate": True,
+            "apply": SemanticCatalogRepository._apply_capability,
+        },
+        "semantic_types": {
+            **specs["semantic_types"],
+            "deprecate": True,
+            "apply": SemanticCatalogRepository._apply_semantic_type,
+        },
+        "entities": {
+            **specs["entities"],
+            "deprecate": True,
+            "apply": SemanticCatalogRepository._apply_entity,
+        },
+        "semantic_join_rules": {
+            **specs["semantic_join_rules"],
+            "deprecate": False,
+            "apply": SemanticCatalogRepository._apply_semantic_join_rule,
+        },
+        "capability_entity_links": {
+            **specs["capability_entity_links"],
+            "deprecate": False,
+            "apply": SemanticCatalogRepository._apply_capability_entity_link,
+        },
+        "capability_dependencies": {
+            **specs["capability_dependencies"],
+            "deprecate": False,
+            "apply": SemanticCatalogRepository._apply_capability_dependency,
+        },
+    }
+
+
+def _catalog_item_row(conn: Any, spec: dict[str, Any], item_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        f"select * from {spec['table']} where {spec['key']} = %s",
+        (item_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _catalog_delete_blockers(conn: Any, section: str, item_id: str) -> list[dict[str, Any]]:
+    checks = {
+        "capabilities": [
+            ("capability_entity_links", "select count(*) as count from sp_capability_entity_links where capability_id = %s and status in ('active', 'approved')"),
+            ("capability_dependencies", "select count(*) as count from sp_capability_dependencies where (capability_id = %s or depends_on_capability_id = %s) and status in ('active', 'approved')"),
+            ("capability_documents", "select count(*) as count from sp_capability_documents where capability_id = %s and status in ('active', 'approved')"),
+            ("operation_contracts", "select count(*) as count from sp_operation_contracts where capability_id = %s and status = 'approved'"),
+            ("operation_variants", "select count(*) as count from sp_operation_variants where capability_id = %s and status = 'approved'"),
+            ("capability_implementations", "select count(*) as count from sp_capability_implementations where capability_id = %s and status in ('active', 'approved', 'planned')"),
+            ("planning_examples", "select count(*) as count from sp_planning_examples where expected_capability_ids && %s::text[] and status in ('active', 'approved')"),
+        ],
+        "semantic_types": [
+            ("entity_identifiers", "select count(*) as count from sp_entity_identifiers where semantic_type_id = %s and status in ('active', 'approved')"),
+            ("capability_entity_links", "select count(*) as count from sp_capability_entity_links where semantic_type_id = %s and status in ('active', 'approved')"),
+            ("capability_dependencies", "select count(*) as count from sp_capability_dependencies where semantic_type_id = %s and status in ('active', 'approved')"),
+            ("field_mappings", "select count(*) as count from sp_field_mappings where semantic_type_id = %s and status = 'approved'"),
+            ("semantic_join_rules", "select count(*) as count from sp_semantic_join_rules where (from_semantic_type_id = %s or to_semantic_type_id = %s) and status in ('active', 'approved')"),
+        ],
+        "entities": [
+            ("entity_identifiers", "select count(*) as count from sp_entity_identifiers where entity_id = %s and status in ('active', 'approved')"),
+            ("capability_entity_links", "select count(*) as count from sp_capability_entity_links where entity_id = %s and status in ('active', 'approved')"),
+            ("semantic_join_rules", "select count(*) as count from sp_semantic_join_rules where (from_entity_id = %s or to_entity_id = %s) and status in ('active', 'approved')"),
+        ],
+    }
+    blockers = []
+    for name, sql in checks.get(section, []):
+        params: tuple[Any, ...]
+        if section == "capabilities" and name == "planning_examples":
+            params = ([item_id],)
+        elif sql.count("%s") == 2:
+            params = (item_id, item_id)
+        else:
+            params = (item_id,)
+        row = conn.execute(sql, params).fetchone()
+        count = int(row["count"] if row else 0)
+        if count:
+            blockers.append({"section": name, "count": count})
+    return blockers
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _catalog_version_snapshot(catalog: dict[str, Any]) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {}
+    for section in CATALOG_VERSION_SECTIONS:
+        value = catalog.get(section)
+        if isinstance(value, list):
+            snapshot[section] = list(value)
+        elif isinstance(value, dict):
+            snapshot[section] = dict(value)
+        elif section in {"operation_fields", "capability_implementations"}:
+            snapshot[section] = []
+        else:
+            snapshot[section] = {}
+    return snapshot
+
+
+def _catalog_version_summary(version: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": version.get("id"),
+        "version_number": version.get("version_number"),
+        "status": version.get("status"),
+        "reason": version.get("reason"),
+        "proposal_id": version.get("proposal_id"),
+        "snapshot_sha256": version.get("snapshot_sha256"),
+        "counts": version.get("counts") or {},
+        "metadata": version.get("metadata") or {},
+        "created_by": version.get("created_by"),
+        "created_at": version.get("created_at"),
+    }
+
+
+def _catalog_snapshot_diff(base: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    sections: dict[str, dict[str, Any]] = {}
+    for section in sorted(set(base) | set(target)):
+        base_items = _snapshot_section_items(base.get(section))
+        target_items = _snapshot_section_items(target.get(section))
+        added = sorted(set(target_items) - set(base_items))
+        removed = sorted(set(base_items) - set(target_items))
+        changed = sorted(
+            item_id
+            for item_id in set(base_items) & set(target_items)
+            if not _json_equal(base_items[item_id], target_items[item_id])
+        )
+        if not added and not removed and not changed:
+            continue
+        sections[section] = {
+            "added": added,
+            "removed": removed,
+            "changed": changed,
+            "counts": {
+                "added": len(added),
+                "removed": len(removed),
+                "changed": len(changed),
+            },
+        }
+    return {
+        "sections": sections,
+        "counts": {
+            "sections_changed": len(sections),
+            "added": sum(item["counts"]["added"] for item in sections.values()),
+            "removed": sum(item["counts"]["removed"] for item in sections.values()),
+            "changed": sum(item["counts"]["changed"] for item in sections.values()),
+        },
+    }
+
+
+def _snapshot_section_items(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {str(key): item for key, item in value.items()}
+    if isinstance(value, list):
+        items: dict[str, Any] = {}
+        for index, item in enumerate(value):
+            if isinstance(item, dict):
+                item_id = (
+                    item.get("id")
+                    or item.get("operation_id")
+                    or item.get("variant_id")
+                    or item.get("document_id")
+                    or item.get("key")
+                    or index
+                )
+            else:
+                item_id = index
+            items[str(item_id)] = item
+        return items
+    return {}
+
+
+def _catalog_snapshot_counts(snapshot: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for key, value in snapshot.items():
+        if isinstance(value, dict):
+            counts[key] = len(value)
+        elif isinstance(value, list):
+            counts[key] = len(value)
+    return counts
 
 
 def _capability_document_from_capability(

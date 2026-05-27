@@ -27,6 +27,7 @@ def validate_llm_analysis(analysis: dict[str, Any]) -> None:
             raise ValueError(f"llm analysis field must be a list: {key}")
     resources = {str(item.get("id") or "") for item in _list(analysis.get("resources"))}
     operations = {str(item.get("operation_id") or "") for item in _list(analysis.get("operations"))}
+    variants = {str(item.get("variant_id") or "") for item in _list(analysis.get("operation_variants"))}
     semantic_types = {str(item.get("id") or "") for item in _list(analysis.get("semantic_types"))}
     entities = {str(item.get("id") or "") for item in _list(analysis.get("entities"))}
     capabilities = {str(item.get("id") or "") for item in _list(analysis.get("capabilities"))}
@@ -35,6 +36,7 @@ def validate_llm_analysis(analysis: dict[str, Any]) -> None:
     semantic_types.discard("")
     entities.discard("")
     capabilities.discard("")
+    variants.discard("")
     for item in _list(analysis.get("entity_identifiers")):
         entity_id = _require(item, "entity_id", "entity_identifier")
         semantic_type_id = _require(item, "semantic_type_id", "entity_identifier")
@@ -104,6 +106,9 @@ def validate_llm_analysis(analysis: dict[str, Any]) -> None:
             raise ValueError(f"implementation references unknown operation: {operation_id}")
         if capability_id not in capabilities:
             raise ValueError(f"implementation references unknown capability: {capability_id}")
+        variant_id = str(item.get("variant_id") or "")
+        if variant_id and variant_id not in variants:
+            raise ValueError(f"implementation references unknown variant: {variant_id}")
     for item in _list(analysis.get("field_mappings")):
         operation_id = _require(item, "operation_id", "field_mapping")
         semantic_type_id = _require(item, "semantic_type_id", "field_mapping")

@@ -15,18 +15,17 @@ except ImportError:  # pragma: no cover
         return decorator
 
 from services.semantic_platform.adapters.worker.tasks.run_ingestion_graph import run_ingestion_graph
-from services.semantic_platform.adapters.worker.tasks.scan_sources import scan_sources, source_document
-
-
-DEFAULT_SOURCES_ROOT = Path("sources")
+from services.semantic_platform.adapters.worker.tasks.scan_sources import DEFAULT_IMPORT_ROOT, scan_sources, source_document
 
 
 @flow(name="semantic-platform-source-ingestion")
 def semantic_platform_source_ingestion(
-    sources_root: str | Path = DEFAULT_SOURCES_ROOT,
+    sources_root: str | Path = DEFAULT_IMPORT_ROOT,
     source: str | Path | None = None,
     commit_mode: str = "proposal",
     manual_llm_response_path: str | Path | None = None,
+    llm_secret_ref: str | None = None,
+    llm_mode: str | None = None,
     force: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -46,6 +45,8 @@ def semantic_platform_source_ingestion(
             document["path"],
             commit_mode=commit_mode,
             manual_llm_response=manual_llm_response,
+            llm_secret_ref=llm_secret_ref,
+            llm_mode=llm_mode,
             force=force,
         )
         output = {"path": document["path"], "sha256": document["sha256"], **result}
@@ -57,6 +58,8 @@ def semantic_platform_source_ingestion(
         "sources_root": str(sources_root),
         "commit_mode": commit_mode,
         "manual_llm_response_path": str(manual_llm_response_path) if manual_llm_response_path else None,
+        "llm_secret_ref": llm_secret_ref,
+        "llm_mode": llm_mode,
         "force": force,
         "dry_run": dry_run,
         "processed": processed,
@@ -83,10 +86,12 @@ def _load_manual_llm_response(path: str | Path | None) -> dict[str, Any] | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run semantic source ingestion into Postgres.")
-    parser.add_argument("--sources-root", default=str(DEFAULT_SOURCES_ROOT))
+    parser.add_argument("--sources-root", default=str(DEFAULT_IMPORT_ROOT))
     parser.add_argument("--source", default=None)
     parser.add_argument("--commit-mode", choices=["proposal", "direct_apply"], default="proposal")
     parser.add_argument("--manual-llm-response", default=None)
+    parser.add_argument("--llm-secret-ref", default=None)
+    parser.add_argument("--llm-mode", default=None)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -95,6 +100,8 @@ def main() -> None:
         source=args.source,
         commit_mode=args.commit_mode,
         manual_llm_response_path=args.manual_llm_response,
+        llm_secret_ref=args.llm_secret_ref,
+        llm_mode=args.llm_mode,
         force=args.force,
         dry_run=args.dry_run,
     )

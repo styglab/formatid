@@ -11,6 +11,7 @@ URL_RE = re.compile(r"https?://[^\s|<>\"]+")
 OPERATION_TOKEN_RE = re.compile(r"\b(?P<operation>(?:get|search|list|read|find|check|validate)[A-Za-z0-9_]{4,})\b", re.IGNORECASE)
 PATH_OPERATION_RE = re.compile(r"/(?P<operation>(?:get|search|list|read|find|check|validate)[A-Za-z0-9_]{4,})\b", re.IGNORECASE)
 CONTROL_VALUE_RE = re.compile(r"(?P<value>[A-Za-z0-9_-]{1,20})\s*[:=]\s*(?P<label>[^,;/|]{1,80})")
+CONDITIONAL_VALUE_RE = re.compile(r"(?P<value>[A-Za-z0-9_-]{1,20})\s*(?:인\s*)?경우\s*(?P<label>[^,;/|]{1,80})")
 
 
 def extract_blocks(text: str) -> list[dict[str, Any]]:
@@ -403,15 +404,13 @@ def _example_candidates(blocks: list[dict[str, Any]], sections: list[dict[str, A
 def _control_field_candidates(blocks: list[dict[str, Any]], sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     controls = []
     for section in sections:
+        controls.extend(_control_fields_from_request_tables(section, blocks))
         for block in blocks:
             if not (section["block_start"] <= int(block["index"]) < section["block_end"]):
                 continue
             text = str(block.get("text") or "")
-            values = [
-                {"value": match.group("value"), "label": match.group("label").strip()}
-                for match in CONTROL_VALUE_RE.finditer(text)
-            ]
-            if len(values) >= 2 or any(token in text for token in ("구분", "선택", "조건", "필수", "enum", "code")):
+            values = _control_values(text)
+            if len(values) >= 2 or _looks_like_control_text(text):
                 controls.append(
                     {
                         "section_id": section["id"],
@@ -421,4 +420,101 @@ def _control_field_candidates(blocks: list[dict[str, Any]], sections: list[dict[
                         "evidence": {"block_id": block["id"]},
                     }
                 )
-    return controls[:500]
+    return _dedupe_control_candidates(controls)[:500]
+
+
+def _control_fields_from_request_tables(section: dict[str, Any], blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [
+        block
+        for block in blocks
+        if section["block_start"] <= int(block["index"]) < section["block_end"] and block.get("kind") == "table_row"
+    ]
+    candidates = []
+    for table in _group_table_rows(rows):
+        if _table_direction(table) not in {"request", "unknown"}:
+            continue
+        for row in table:
+            cells = _table_cells(str(row.get("text") or ""))
+            if len(cells) < 2:
+                continue
+            raw_name = cells[0].strip()
+            if not _looks_like_field_name(raw_name):
+                continue
+            label = cells[1].strip() if len(cells) > 1 else ""
+            sample = cells[4].strip() if len(cells) > 4 else ""
+            description = cells[-1].strip()
+            row_text = " | ".join(cell for cell in cells if cell)
+            values = _control_values(row_text)
+            looks_like_control_field = _looks_like_control_field(" ".join([raw_name, label]))
+            if not values and looks_like_control_field and _looks_like_enum_sample(sample):
+                values = [{"value": sample, "label": label or description}]
+            if values and looks_like_control_field:
+                candidates.append(
+                    {
+                        "section_id": section["id"],
+                        "operation_name": section.get("operation_name"),
+                        "field_name": raw_name,
+                        "label": label,
+                        "sample": sample,
+                        "description": description,
+                        "text": row_text[:1000],
+                        "values": values[:20],
+                        "evidence": {"block_id": row["id"]},
+                    }
+                )
+    return candidates
+
+
+def _control_values(text: str) -> list[dict[str, str]]:
+    values = []
+    seen: set[str] = set()
+    for pattern in (CONTROL_VALUE_RE, CONDITIONAL_VALUE_RE):
+        for match in pattern.finditer(text):
+            value = match.group("value").strip()
+            label = match.group("label").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            values.append({"value": value, "label": label})
+    return values
+
+
+def _looks_like_control_text(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in text for token in ("구분", "선택", "조건", "필수", "분류", "타입", "코드")) or any(
+        token in lowered for token in ("enum", "code", "type", "division", "category", "kind")
+    )
+
+
+def _looks_like_control_field(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in text for token in ("구분", "선택", "분류", "타입", "코드")) or any(
+        token in lowered for token in ("enum", "code", "type", "division", "category", "kind")
+    )
+
+
+def _looks_like_enum_sample(value: str) -> bool:
+    stripped = value.strip()
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{1,8}", stripped)) and not stripped.isdigit() or stripped in {"0", "1", "2", "3", "4", "5"}
+
+
+def _looks_like_field_name(value: str) -> bool:
+    if len(value) > 80 or value.isdigit() or any(char.isspace() for char in value):
+        return False
+    return bool(re.search(r"[A-Za-z_가-힣]", value))
+
+
+def _dedupe_control_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped = []
+    seen: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        key = (
+            str(candidate.get("section_id") or ""),
+            str(candidate.get("field_name") or ""),
+            str(candidate.get("text") or "")[:200],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped

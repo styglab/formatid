@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
-INGESTION_GRAPH_VERSION = "2026-05-19.capability-closure-v2"
-INGESTION_PROMPT_VERSION = "2026-05-19.contract-interpreter-v2"
+INGESTION_GRAPH_VERSION = "2026-05-27.llm-first-verification-v1"
+INGESTION_PROMPT_VERSION = "2026-05-27.contract-interpreter-v4"
 
 
 class SourceGraphState(TypedDict, total=False):
@@ -49,3 +49,5 @@ class SourceGraphState(TypedDict, total=False):
     apply_results: list[dict[str, Any]]
     capability_document_result: dict[str, Any] | None
     embedding_result: dict[str, Any] | None
+    llm_progress: dict[str, Any]
+    progress_callback: Any

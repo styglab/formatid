@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from services.semantic_platform.lib.ingestion.evidence_snapshot import write_evidence_snapshot
 from services.semantic_platform.lib.ingestion.graph_runtime import CompiledStateGraph
@@ -16,6 +16,7 @@ def run_source_ingestion(
     manual_llm_response: dict[str, Any] | None = None,
     apply: bool = False,
     force: bool = False,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     ordered_nodes = graph.ordered_nodes
     if not ordered_nodes:
@@ -23,6 +24,7 @@ def run_source_ingestion(
     state: SourceGraphState = {
         "source_path": str(source_path),
         "manual_llm_response": manual_llm_response,
+        "progress_callback": progress_callback,
     }
     state = ordered_nodes[0](state)
     repo = SemanticCatalogRepository()
@@ -47,6 +49,7 @@ def run_source_ingestion(
         }
 
     for node in ordered_nodes[1:]:
+        _emit_progress(progress_callback, {"step": node.__name__, "status": "running"})
         state = node(state)
 
     chunks = state["chunks"]
@@ -93,12 +96,23 @@ def run_source_ingestion(
         if capability_document_result
         else None
     )
+    catalog_version_result = (
+        repo.create_catalog_version(
+            reason="source_ingestion_direct_apply",
+            proposal_id=proposals[0]["id"] if proposals else None,
+            created_by="ingestion",
+            metadata={"source_document_id": document["id"]},
+        )
+        if apply_results
+        else None
+    )
     state["stored_proposal"] = stored_proposals[0] if stored_proposals else {}
     state["stored_proposals"] = stored_proposals
     state["apply_result"] = apply_result
     state["apply_results"] = apply_results
     state["capability_document_result"] = capability_document_result
     state["embedding_result"] = embedding_result
+    state["catalog_version_result"] = catalog_version_result
     return {
         "source_document_id": document["id"],
         "proposal_ids": [proposal["id"] for proposal in proposals],
@@ -122,7 +136,14 @@ def run_source_ingestion(
         "apply_result": apply_result,
         "capability_document_result": capability_document_result,
         "embedding_result": embedding_result,
+        "catalog_version_result": catalog_version_result,
+        "llm_progress": state.get("llm_progress", {}),
     }
+
+
+def _emit_progress(callback: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
+    if callback is not None:
+        callback(event)
 
 
 def _applied_capability_ids(apply_results: list[dict[str, Any]]) -> list[str]:

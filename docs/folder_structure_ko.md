@@ -93,6 +93,7 @@ services/semantic_platform
 
 - source document ingestion
 - proposal/review workflow
+- catalog version snapshot/export/restore
 - capability catalog
 - semantic entity registry
 - field/semantic type registry
@@ -100,7 +101,7 @@ services/semantic_platform
 - capability embedding/vector index
 - LLM execution planner
 - semantic join/dependency graph
-- dashboard/API/worker
+- dashboard/admin API/planner API/worker
 
 하지 말아야 할 일:
 
@@ -115,9 +116,10 @@ provider 실행은 `apps/pubdata_mcp`가 담당한다.
 
 ```text
 adapters/
-  api/        HTTP API adapter
-  dashboard/  UI adapter
-  worker/     optional Prefect background/manual adapter
+  admin_api/    admin/control-plane HTTP API adapter
+  planner_api/  runtime planner API adapter
+  dashboard/    UI adapter
+  worker/       optional Prefect background/manual adapter
 lib/
   ingestion/  source document -> evidence/proposal/apply
   planner/    question -> semantic execution plan
@@ -130,10 +132,15 @@ manifests/    compose/catalog service declarations
 semantic platform 내부 라이브러리이며 ingestion graph, planner,
 repository, runtime context처럼 여러 실행 표면에서 공유되는 코드를 둔다.
 
-`adapters/api/app/main.py`는 FastAPI route와 HTTP 관심사만 둔다.
-`adapters/api/app/gateway.py`는 route에서 `lib/storage`, `lib/planner`,
+`adapters/admin_api/app/main.py`는 dashboard/admin용 FastAPI route와 HTTP 관심사만 둔다.
+`adapters/admin_api/app/gateway.py`는 route에서 `lib/storage`, `lib/planner`,
 `lib/context`로 들어가는 얇은 gateway다. 도메인 모델이나 semantic
 추론은 gateway에 두지 않는다.
+
+`adapters/planner_api/`는 MCP/executor runtime 전용 API다. 승인된 catalog,
+execution contract, capability retrieval, endpoint check 기록, runtime
+context, execution planning만 노출한다. source upload, secret CRUD,
+ingestion, proposal review, catalog mutation은 노출하지 않는다.
 
 `lib/ingestion/` 내부는 다음 역할로 나눈다.
 
@@ -167,7 +174,7 @@ response validation, proposal closure 같은 큰 관심사를 다시 `graph.py`�
 
 경계 규칙:
 
-- `adapters/api/`는 세부 catalog mutation을 직접 구현하지 않고 repository/domain
+- `adapters/admin_api/`는 세부 catalog mutation을 직접 구현하지 않고 repository/domain
   API를 호출한다.
 - `adapters/dashboard/`는 provider/domain routing 규칙을 갖지 않는다.
 - `lib/ingestion/`은 evidence 수집을 위한 endpoint probe는 할 수 있지만,
@@ -252,10 +259,11 @@ MCP tool 정의를 코드에 직접 하드코딩하지 않고 spec 기반으로 
 
 ## sources/
 
-원본 API 문서를 둔다.
+Retired. 루트 `sources/` 폴더는 더 이상 운영 source of truth가 아니다.
 
-문서는 그대로 실행 대상으로 쓰지 않는다. ingestion graph가 문서를 읽고
-LLM이 의미 구조를 제안한 뒤, review/apply를 통해 catalog에 반영한다.
+원본 API 문서는 Semantic Platform Dashboard/API로 업로드하고, 파일 본문은
+MinIO/S3 호환 object storage에 source revision으로 저장한다. ingestion graph는
+DB의 source/revision metadata와 object storage 파일을 기준으로 실행된다.
 
 ## data/
 
@@ -322,13 +330,17 @@ tmp/retired_core/
 ```
 
 `tmp` 아래 코드는 active runtime path가 아니다. 참고용으로만 본다.
+Codex는 `tmp/*` 아래 비밀이 아닌 임시 산출물을 사용자에게 다시 묻지 않고
+생성, 수정, 검증, 복사, 삭제할 수 있다. codex_manual LLM payload,
+일회성 request/response JSON, 검증 출력은 여기에 둔다. secret 값은
+`tmp/*`에 쓰지 않는다.
 
 ## 설계 원칙
 
 - semantic planning은 `services/semantic_platform`
 - provider execution은 `apps/pubdata_mcp`
 - generic runtime은 `core`
-- source documents는 `sources`
+- 운영 source documents는 Semantic Platform source registry/object storage
 - local models/runtime data는 `data`
 - generated compose는 `deploy/compose`
 - retired code는 `tmp`

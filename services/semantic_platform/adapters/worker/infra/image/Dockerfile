@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY apps ./apps
 COPY services ./services
 COPY core ./core
-COPY sources ./sources
+RUN mkdir -p /app/imports
 
 ENV PYTHONPATH=/app
 

@@ -15,7 +15,6 @@ from services.semantic_platform.lib.ingestion.nodes.llm_proposal import (
 )
 from services.semantic_platform.lib.ingestion.nodes.proposal import (
     build_review_proposal,
-    keep_passed_verified_capabilities,
 )
 from services.semantic_platform.lib.ingestion.nodes.source import read_source
 
@@ -29,7 +28,6 @@ __all__ = [
     "llm_propose_capability_catalog",
     "llm_propose_execution_catalog",
     "read_source",
-    "keep_passed_verified_capabilities",
     "verify_capabilities",
     "verify_endpoint_candidates",
 ]

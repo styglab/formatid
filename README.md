@@ -67,6 +67,8 @@ semantic intelligence layer:
   implementation metadata needed to call provider APIs.
 - Governance Context: proposals, lineage, evidence, review decisions, and
   deprecation/merge decisions.
+- Catalog Versions: approved declarative catalog snapshots for audit, export,
+  dashboard read-only viewing, diff, and restore.
 
 `apps/pubdata_mcp` is intentionally not the semantic layer. It is the MCP/tool
 runtime and deterministic contract interpreter.
@@ -84,6 +86,15 @@ Question
 The executor must not contain provider/domain choices such as "if this Korean
 word appears, choose this operation". Those choices belong in reviewed catalog
 data as capabilities, operation variants, contracts, and field mappings.
+
+Approved catalog mutations create catalog versions. A version snapshot contains
+the declarative catalog only: semantic types, entities, capabilities, resources,
+operations, contracts, variants, field mappings, implementations, join rules,
+dependencies, and planning examples. Derived retrieval artifacts such as
+capability documents/vectors, endpoint checks, proposals, and source evidence
+remain outside the snapshot. Versions can be viewed read-only in the dashboard,
+exported as JSON, compared, or restored; restore creates a new active version
+instead of overwriting version history.
 
 ## Run
 
@@ -140,7 +151,7 @@ Manifest sources:
 
 Current cleanup policy:
 
-- Keep canonical source documents in `sources/`.
+- Keep canonical source documents in Semantic Platform uploads/object storage, not in root `sources/`.
 - Keep embedding models under `data/models/embeddings/`.
 - Keep generated Python caches and temporary backup trees out of the repo.
 - Retired app code is kept under `tmp/retired_apps/` for reference only.

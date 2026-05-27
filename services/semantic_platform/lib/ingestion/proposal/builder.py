@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from services.semantic_platform.lib.ingestion.llm.runtime import active_llm_mode
 from services.semantic_platform.lib.ingestion.state import SourceGraphState
 
 
@@ -223,6 +224,12 @@ def _capability_catalog_closure(
         if str(item.get("operation_id") or "") in operation_ids
         and str(item.get("capability_id") or item.get("capability") or capability_id) == capability_id
     ]
+    operation_by_id = {str(item.get("operation_id") or ""): item for item in operations}
+    resource_by_id = {str(item.get("id") or ""): item for item in state.get("resources", [])}
+    operation_contracts = [
+        _contract_with_operation_trace(item, operation_by_id, resource_by_id)
+        for item in operation_contracts
+    ]
     semantic_type_ids = set(str(value) for value in _list_values(capability.get("inputs")))
     semantic_type_ids.update(str(value) for value in _list_values(capability.get("outputs")))
     for contract in operation_contracts:
@@ -318,6 +325,24 @@ def _capability_catalog_closure(
         "planning_examples": planning_examples,
         "capability_implementations": implementations,
     }
+
+
+def _contract_with_operation_trace(
+    contract: dict[str, Any],
+    operation_by_id: dict[str, dict[str, Any]],
+    resource_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    operation = operation_by_id.get(str(contract.get("operation_id") or ""), {})
+    resource = resource_by_id.get(str(contract.get("resource_id") or operation.get("resource_id") or ""), {})
+    enriched = dict(contract)
+    for key in ("method", "path", "operation_name"):
+        if not enriched.get(key) and operation.get(key):
+            enriched[key] = operation.get(key)
+    if not enriched.get("provider"):
+        enriched["provider"] = resource.get("provider") or operation.get("provider")
+    if not enriched.get("base_url") and resource.get("base_url"):
+        enriched["base_url"] = resource.get("base_url")
+    return enriched
 
 
 def _operation_field_semantic_type(item: dict[str, Any]) -> str:
@@ -458,9 +483,7 @@ def _proposal_creator(state: SourceGraphState) -> str:
 
 
 def _llm_mode() -> str:
-    mode = os.getenv("SEMANTIC_PLATFORM_LLM_MODE") or os.getenv("LLM_MODE") or "disabled"
-    normalized = mode.strip().lower()
-    return normalized if normalized in {"disabled", "codex_manual", "openai"} else "disabled"
+    return active_llm_mode()
 
 
 def _legacy_items(payload: dict[str, Any]) -> bool:

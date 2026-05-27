@@ -35,6 +35,7 @@ MCP Client
 
 - source ingestion
 - catalog/proposal review
+- catalog version snapshot/export/restore
 - canonical semantic types
 - capabilities and operation variants
 - operation contracts and field mappings
@@ -80,6 +81,12 @@ for validating an approved operation or variant.
 
 ```text
 GET /semantic/execution/contracts
+```
+
+from `semantic-platform-planner-api`, not the admin API. Runtime planning uses:
+
+```text
+POST /semantic/planner/execution-plan
 ```
 
 The response must include:
