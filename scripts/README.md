@@ -15,6 +15,7 @@ Current commands:
 - `check-all`: run local validation suite
 - `catalog`: print platform/app service catalog
 - `smoke`: run a generated compose smoke test for active services
-- `semantic-catalog reset`: clear semantic platform catalog data
+- `semantic-layer reset`: clear semantic layer catalog data
+- `semantic-layer seed-registry`: seed core semantic type registry
 - `checkpoints`: inspect runtime checkpoints
 - `prune-observability`: delete old observability rows

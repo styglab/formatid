@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 214 36% 98%;
+  --foreground: 215 28% 13%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 28% 13%;
+  --muted: 214 28% 94%;
+  --muted-foreground: 215 13% 43%;
+  --border: 214 20% 86%;
+  --primary: 217 78% 56%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 214 34% 92%;
+  --accent-foreground: 215 28% 13%;
+  --destructive: 0 72% 55%;
+  --glow: 59 130 246;
+  --panel-top: 255 255 255;
+  --panel-bottom: 247 250 255;
+}
+
+.dark {
+  --background: 220 28% 8%;
+  --foreground: 226 40% 96%;
+  --card: 218 24% 11%;
+  --card-foreground: 226 40% 96%;
+  --muted: 218 18% 16%;
+  --muted-foreground: 226 14% 68%;
+  --border: 218 16% 20%;
+  --primary: 210 92% 63%;
+  --primary-foreground: 220 28% 8%;
+  --accent: 217 20% 15%;
+  --accent-foreground: 226 40% 96%;
+  --glow: 96 165 250;
+  --panel-top: 22 28 40;
+  --panel-bottom: 15 20 30;
+}
+
+html[data-color-theme="orange"] {
+  --primary: 24 94% 56%;
+  --accent: 30 44% 93%;
+  --glow: 249 115 22;
+}
+
+html.dark[data-color-theme="orange"] {
+  --primary: 27 96% 63%;
+  --accent: 24 18% 15%;
+  --glow: 251 146 60;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  min-height: 100%;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  background-image:
+    radial-gradient(circle at top left, rgba(var(--glow), 0.12), transparent 28%),
+    linear-gradient(180deg, hsl(var(--background) / 0.82), hsl(var(--background) / 0.98));
+}
+
+.workspace-panel {
+  background: linear-gradient(180deg, rgb(var(--panel-top) / 0.96), rgb(var(--panel-bottom) / 0.92));
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.dark .workspace-panel {
+  box-shadow: 0 14px 36px rgba(2, 6, 23, 0.36);
+}

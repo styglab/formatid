@@ -7,12 +7,12 @@ from typing import Any
 import requests
 
 
-SEMANTIC_PLATFORM_API_URL = os.getenv("SEMANTIC_PLATFORM_API_URL", "http://semantic-platform-api:8000")
-SEMANTIC_PLATFORM_PLANNER_API_URL = os.getenv(
-    "SEMANTIC_PLATFORM_PLANNER_API_URL",
-    "http://semantic-platform-planner-api:8000",
+SEMANTIC_LAYER_API_URL = os.getenv("SEMANTIC_LAYER_API_URL", "http://semantic-layer-api:8000")
+SEMANTIC_LAYER_PLANNER_API_URL = os.getenv(
+    "SEMANTIC_LAYER_PLANNER_API_URL",
+    "http://semantic-layer-planner-api:8000",
 )
-SEMANTIC_PLATFORM_API_TIMEOUT = float(os.getenv("SEMANTIC_PLATFORM_API_TIMEOUT", "2"))
+SEMANTIC_LAYER_API_TIMEOUT = float(os.getenv("SEMANTIC_LAYER_API_TIMEOUT", "2"))
 
 
 def load_catalog() -> dict[str, Any]:
@@ -102,7 +102,7 @@ def semantic_query(
         "plan": plan,
         "capability_readiness": readiness,
         "catalog_usage": {
-            "source": "semantic_platform",
+            "source": "semantic_layer",
             "capability_implementations": sum(len(items) for items in implementations.values()),
             "operation_field_mappings": len(execution_contracts.get("operation_field_mappings", {})),
             "operation_contracts": len(execution_contracts.get("operation_contracts", {})),
@@ -288,11 +288,11 @@ def _semantic_query_evidence(results: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def _get(path: str, *, runtime: bool = False) -> dict[str, Any] | None:
-    base_url = SEMANTIC_PLATFORM_PLANNER_API_URL if runtime else SEMANTIC_PLATFORM_API_URL
+    base_url = SEMANTIC_LAYER_PLANNER_API_URL if runtime else SEMANTIC_LAYER_API_URL
     try:
         response = requests.get(
             f"{base_url.rstrip('/')}{path}",
-            timeout=SEMANTIC_PLATFORM_API_TIMEOUT,
+            timeout=SEMANTIC_LAYER_API_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -302,12 +302,12 @@ def _get(path: str, *, runtime: bool = False) -> dict[str, Any] | None:
 
 
 def _post(path: str, payload: dict[str, Any], *, runtime: bool = False) -> dict[str, Any] | None:
-    base_url = SEMANTIC_PLATFORM_PLANNER_API_URL if runtime else SEMANTIC_PLATFORM_API_URL
+    base_url = SEMANTIC_LAYER_PLANNER_API_URL if runtime else SEMANTIC_LAYER_API_URL
     try:
         response = requests.post(
             f"{base_url.rstrip('/')}{path}",
             json=payload,
-            timeout=SEMANTIC_PLATFORM_API_TIMEOUT,
+            timeout=SEMANTIC_LAYER_API_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()

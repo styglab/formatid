@@ -9,7 +9,7 @@
     "apps/pubdata_mcp/infra/env/app.env"
   ],
   "depends_on_service_healthy": [
-    "semantic-platform-planner-api"
+    "semantic-layer-planner-api"
   ],
   "ports": [
     "${HOST_BIND_IP:-127.0.0.1}:${PUBDATA_MCP_HOST_PORT:-8015}:8000"

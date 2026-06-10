@@ -37,21 +37,22 @@ Runnable platform services and backing capabilities:
 - `platform_dashboard`
 
 Services expose generic platform capabilities. They must not contain app-specific business logic,
-except for platform-level control planes such as `services/semantic_platform`.
+except for platform-level control planes such as `services/semantic_layer`.
 App-required services such as `prefect`, `minio`, and `qdrant` are enabled only when an app or platform control plane declares them.
 
-Current semantic platform service:
+Current semantic layer service:
 
-- `services/semantic_platform`
+- Service name: `semantic_layer`
+- Current implementation path: `services/semantic_layer`
 
-Semantic platform source layout:
+Semantic layer source layout:
 
-- `services/semantic_platform/adapters/*`: runnable adapters only
+- `services/semantic_layer/adapters/*`: runnable adapters only
   (`admin_api`, `planner_api`, `dashboard`, `worker`)
-- `services/semantic_platform/lib/*`: internal semantic platform libraries
+- `services/semantic_layer/lib/*`: internal semantic layer libraries
   (`ingestion`, `planner`, `context`, `storage`)
-- `services/semantic_platform/manifests/*`: compose/catalog service
-  declarations for the semantic platform boundary
+- `services/semantic_layer/manifests/*`: compose/catalog service
+  declarations for the semantic layer boundary
 
 ### apps/
 
@@ -61,9 +62,10 @@ Current apps:
 
 - `apps/pubdata_mcp`
 
-### Semantic platform boundary
+### Semantic layer boundary
 
-`services/semantic_platform` is declarative semantic intelligence:
+`semantic_layer` is the declarative semantic layer. The current implementation
+path is `services/semantic_layer`:
 
 - Postgres-backed semantic source of truth
 - capability catalog for retrieval-first tool routing
@@ -116,9 +118,9 @@ It must not own cross-domain planning, global capability ranking, semantic
 join-path reasoning, proposal generation, catalog mutation, canonical semantic
 definitions, or provider-selection rules such as "공사 means this PPS operation".
 
-Capability ids in semantic_platform must be provider-neutral, for example
+Capability ids in semantic_layer must be provider-neutral, for example
 `search_contracts`, not `pps.search_contracts`. Provider/tool implementation
-mappings and provider field mappings belong in semantic_platform Postgres
+mappings and provider field mappings belong in semantic_layer Postgres
 tables as approved declarative contracts. `pubdata_mcp` may read those
 contracts through `/semantic/execution/contracts`, but must not own them.
 `apps/pubdata_mcp/specs/*` is only for MCP tool specs with top-level `tools`.
@@ -128,23 +130,32 @@ Planner and executor contract:
 ```text
 Client question
   -> pubdata_mcp
-  -> services/semantic_platform/adapters/planner_api LLM execution planner
+  -> services/semantic_layer/adapters/planner_api LLM execution planner
   -> semantic execution plan
   -> pubdata_mcp operation executor
   -> provider APIs
   -> semantic normalization / integration / answer
 ```
 
-Semantic platform API services are split by plane:
+Semantic Layer API services are split by plane:
 
-- `semantic-platform-api`: admin/control plane for dashboard, source upload,
+- `semantic-layer-api`: admin/control plane for dashboard, source upload,
   ingestion, proposals, catalog governance, and run tracking.
-- `semantic-platform-planner-api`: runtime plane for MCP/executor clients. It
+- `semantic-layer-planner-api`: runtime plane for MCP/executor clients. It
   exposes approved catalog/contract reads, capability retrieval, endpoint check
   records, runtime context, and execution planning. It must not expose source
   upload, secret CRUD, ingestion, proposal review, or catalog mutation.
 
-`services/semantic_platform` may include operation metadata in a plan:
+When designing or evolving `services/semantic_layer`, use established metadata
+platforms such as DataHub and OpenMetadata as reference points across the full
+system shape, not only UI. This includes information architecture, entity and
+attribute modeling, relationship modeling, execution contract structure,
+governance and review workflows, explorer/search patterns, graph/lineage views,
+inspector patterns, and operator-facing dashboard UX. Prefer metadata-workspace
+and governance-platform patterns over generic marketing, admin-template, or
+CRUD-product layouts.
+
+`services/semantic_layer` may include operation metadata in a plan:
 
 - `operation_id`
 - method/path copied from `operation_contracts`
@@ -235,7 +246,7 @@ LLM-backed features must separate mode selection from secret values.
 control signals.
 
 Use `LLM_MODE` as the global mode and app-specific overrides such as
-`SEMANTIC_PLATFORM_LLM_MODE` only when needed.
+`SEMANTIC_LAYER_LLM_MODE` only when needed.
 
 Supported modes:
 
@@ -272,8 +283,8 @@ execution planning, and any future LLM-assisted planning path.
 - Domain logic belongs in `apps/*`.
 - Generic service/runtime logic belongs in `services/*` or `core/*`.
 - App ontology, relationship names, semantic tags, and semantic document builders belong in `apps/<app>/app/semantic`.
-- Semantic planning belongs in `services/semantic_platform/lib/planner`; provider execution belongs in `apps/pubdata_mcp`.
-- `services/semantic_platform/adapters/worker` owns manual/background ingestion jobs and Prefect manual deployments. Do not add schedules until explicitly requested.
+- Semantic planning belongs in `services/semantic_layer/lib/planner`; provider execution belongs in `apps/pubdata_mcp`.
+- `services/semantic_layer/adapters/worker` owns manual/background ingestion jobs and Prefect manual deployments. Do not add schedules until explicitly requested.
 - Prefect control plane manifests live in `services/prefect`; app-specific Prefect workers live under `apps/<app>`.
 - Compose is generated from manifests. Do not hand-edit `deploy/compose/docker-compose.yml` except to inspect generated output.
 - Secret values must stay in env files, not manifests or payloads.

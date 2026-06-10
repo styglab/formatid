@@ -1,0 +1,30 @@
+{
+  "app": "data_score",
+  "description": "AI-native data quality evaluation with traditional and semantic scoring",
+  "profiles": [
+    "data-score",
+    "data_score"
+  ],
+  "requires": {
+    "platform_services": [
+      "postgres",
+      "redis"
+    ]
+  },
+  "nginx_routes": [
+    {
+      "path_prefix": "/data-score",
+      "upstream_service": "data-score-api",
+      "upstream_port": 8000,
+      "strip_prefix": true,
+      "proxy_read_timeout": "3600s",
+      "proxy_send_timeout": "3600s"
+    },
+    {
+      "path_prefix": "/data-score-dashboard",
+      "upstream_service": "data-score-dashboard",
+      "upstream_port": 3000,
+      "strip_prefix": false
+    }
+  ]
+}

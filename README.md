@@ -1,10 +1,9 @@
 # formatid
 
-AI-ready data platform for domain ingestion, semantic enrichment, and AI access
-apps. The current public-data direction is a **Semantic Agentic Data Platform**:
-public API documents are ingested into a semantic catalog, LLM planners choose
-capabilities and execution DAGs, and deterministic executors call approved API
-contracts.
+AI-ready data platform for domain ingestion, semantic layer context, and AI access
+apps. The current public-data direction is a **Semantic Layer Platform**:
+public API documents and manual authoring both produce reviewed semantic,
+capability, and execution-contract context for LLM planning.
 
 The platform separates runtime execution, reusable service capabilities, and
 app-owned domain logic. AI-facing apps such as MCP servers, RAG APIs, and domain
@@ -26,7 +25,7 @@ Natural language
   and cross-app contracts.
 - `services/*`: platform services and backing capabilities such as Nginx,
   Postgres, Redis, platform API, platform dashboard, embedding service, and
-  `services/semantic_platform`.
+  `services/semantic_layer`.
 - `apps/*`: app orchestration, business rules, persistence, ontology, semantic transformers, and user-facing AI apps.
 
 See [docs/folder_structure_ko.md](docs/folder_structure_ko.md) for the current
@@ -41,7 +40,7 @@ Layer rule:
 ## Current Apps
 
 - `apps/pubdata_mcp`: MCP runtime for approved semantic execution contracts
-  produced by `services/semantic_platform`.
+  produced by `services/semantic_layer`.
 
 ## Platform Services
 
@@ -58,10 +57,11 @@ only when an app or platform control plane declares them.
 
 ## Semantic Layer
 
-For public API orchestration, `services/semantic_platform` is the declarative
-semantic intelligence layer:
+For public API orchestration, `services/semantic_layer` is the declarative
+semantic layer:
 
-- Capability Catalog: what the platform can do, optimized for retrieval and
+- Canonical Semantic Model: shared semantic types and relationships.
+- Capability Catalog: provider-neutral capabilities optimized for retrieval and
   planner grounding.
 - Execution Catalog: resources, operations, contracts, variants, mappings, and
   implementation metadata needed to call provider APIs.
@@ -76,7 +76,7 @@ runtime and deterministic contract interpreter.
 ```text
 Question
   -> pubdata_mcp semantic_query
-  -> semantic_platform capability retrieval + planner
+  -> semantic_layer capability retrieval + planner
   -> semantic execution graph
   -> pubdata_mcp contract interpreter
   -> provider APIs
@@ -151,7 +151,7 @@ Manifest sources:
 
 Current cleanup policy:
 
-- Keep canonical source documents in Semantic Platform uploads/object storage, not in root `sources/`.
+- Keep canonical source documents in Semantic Layer uploads/object storage, not in root `sources/`.
 - Keep embedding models under `data/models/embeddings/`.
 - Keep generated Python caches and temporary backup trees out of the repo.
 - Retired app code is kept under `tmp/retired_apps/` for reference only.

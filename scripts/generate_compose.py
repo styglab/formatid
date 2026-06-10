@@ -196,17 +196,30 @@ def _render_nginx_route(route: dict) -> str:
     upstream_service = route["upstream_service"]
     upstream_port = int(route.get("upstream_port", 8000))
     variable_name = f"${_safe_nginx_variable(upstream_service)}_upstream"
-    lines = [
-        f"location = {prefix} {{",
-        f"    return 302 {prefix}/;",
-        "}",
-        "",
-        f"location {prefix}/ {{",
-        f"    set {variable_name} http://{upstream_service}:{upstream_port};",
-    ]
-    if route.get("strip_prefix", True):
+    strip_prefix = route.get("strip_prefix", True)
+    if strip_prefix:
+        lines = [
+            f"location = {prefix} {{",
+            f"    return 302 {prefix}/;",
+            "}",
+            "",
+            f"location {prefix}/ {{",
+            f"    set {variable_name} http://{upstream_service}:{upstream_port};",
+        ]
         escaped_prefix = re.escape(prefix)
         lines.append(f"    rewrite ^{escaped_prefix}/(.*)$ /$1 break;")
+    else:
+        lines = [
+            f"location = {prefix} {{",
+            f"    set {variable_name} http://{upstream_service}:{upstream_port};",
+            f"    proxy_pass {variable_name};",
+            f"    proxy_read_timeout {route.get('proxy_read_timeout', '300s')};",
+            f"    proxy_send_timeout {route.get('proxy_send_timeout', '300s')};",
+            "}",
+            "",
+            f"location {prefix}/ {{",
+            f"    set {variable_name} http://{upstream_service}:{upstream_port};",
+        ]
     lines.append(f"    proxy_pass {variable_name};")
     if route.get("proxy_buffering") is False:
         lines.append("    proxy_buffering off;")

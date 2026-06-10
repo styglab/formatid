@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY services/embedding /app/services/embedding
+COPY data/models/embeddings /data/models/embeddings
 
 ENV PYTHONPATH=/app
 

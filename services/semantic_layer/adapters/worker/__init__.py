@@ -1,0 +1,1 @@
+"""Manual/background worker adapter."""

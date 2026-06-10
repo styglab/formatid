@@ -1,4 +1,7 @@
 data/
+!data/models/
+!data/models/embeddings/
+!data/models/embeddings/**
 deploy/compose/postgres/data
 deploy/compose/postgres/data/
 deploy/compose/qdrant/storage
@@ -9,4 +12,9 @@ logs/
 **/__pycache__/
 *.pyc
 **/*.pyc
+**/node_modules/
+**/.next/
+**/.turbo/
+**/.cache/
+**/coverage/
 .git/

@@ -1,19 +1,17 @@
 # 폴더 구조 설명
 
-이 저장소는 공공 API 문서를 단순히 저장하거나 API wrapper를 만드는
-프로젝트가 아니다. 목표는 API 문서를 LLM이 추론 가능한 의미 구조로
-변환하고, MCP 실행 런타임이 승인된 실행 계약만 호출하는
-Semantic Agentic Data Platform이다.
-
-큰 흐름은 다음과 같다.
+이 저장소는 공공 API wrapper나 단순 MCP Registry가 아니다. 목표는 AI
+Agent가 조직 내 Capability를 이해하고, 계획하고, 실행 가능한 컨텍스트를
+얻을 수 있도록 하는 Semantic Layer Platform이다.
 
 ```text
-Raw API documents
-  -> semantic capability graph
+API documents / manual authoring
+  -> canonical semantic model
+  -> capability catalog
+  -> execution contracts / variants
+  -> semantic layer graph
   -> LLM execution planning
-  -> MCP execution runtime
-  -> provider API calls
-  -> semantic normalization / integration
+  -> MCP/app execution runtime
 ```
 
 ## 최상위 구조
@@ -27,168 +25,96 @@ Raw API documents
   docs/
   scripts/
   services/
-  sources/
   tests/
   tmp/
 ```
 
-## apps/
+## services/semantic_layer
 
-앱은 특정 실행 표면이나 도메인 런타임을 소유한다.
+문서상 서비스명은 `semantic_layer`로 부른다. 현재 구현 경로는
+`services/semantic_layer`를 유지한다.
 
-현재 active app은 `apps/pubdata_mcp` 하나다.
+`services/semantic_layer`는 플랫폼 control plane이다. 특정 app이 아니라
+여러 MCP/RAG/domain app이 공유하는 canonical semantic model, capability
+context graph, execution contract, governance context를 소유한다.
 
 ```text
-apps/pubdata_mcp/
-  app/
-    common/
-    main.py
-  specs/
-  infra/
+services/semantic_layer/
+  adapters/
+    admin_api/
+    planner_api/
+    dashboard/
+    worker/
+  lib/
+    model/
+    semantic/
+    capability/
+    execution/
+    authoring/
+    governance/
+    ingestion/
+    planner/
+    context/
+    storage/
   manifests/
 ```
 
-`apps/pubdata_mcp`의 책임:
+책임:
 
-- MCP transport 제공
-- semantic query tool 제공
-- 승인된 operation contract 실행
-- provider HTTP 호출
-- 인증, retry, pagination, response parsing
-- provider response를 semantic result로 정규화
+- canonical semantic type과 relationship 관리
+- provider-neutral capability catalog 관리
+- source-neutral execution contract 관리
+  - source
+  - asset
+  - access path
+  - operation contract
+  - operation variant
+  - field/control mapping
+- API document ingestion을 통한 context change proposal 생성
+- 사람이 직접 semantic/capability/contract를 등록, 수정, 리뷰, 승인
+- proposal, review status, provenance, lineage, conflict 관리
+- approved context를 planner/executor용 package로 제공
+- LLM execution planner와 plan validation 제공
 
-하지 말아야 할 일:
-
-- global capability ranking
-- cross-domain planning
-- proposal 생성
-- semantic catalog mutation
-- provider 선택 규칙 하드코딩
-
-즉, `pubdata_mcp`는 의미를 판단하는 곳이 아니라 승인된 계획을 실행하는
-곳이다.
-
-## services/
-
-서비스는 플랫폼 공통 기능과 control plane을 제공한다.
-
-주요 서비스:
-
-```text
-services/postgres
-services/redis
-services/nginx
-services/platform_api
-services/platform_dashboard
-services/embedding
-services/prefect
-services/semantic_platform
-```
-
-`services/semantic_platform`은 이 저장소의 의미 계층 control plane이다.
-`apps/`로 두지 않는 이유는 특정 앱이 아니라 여러 MCP/RAG/domain app이
-공유해야 하는 semantic source of truth이기 때문이다.
-
-`services/semantic_platform`의 책임:
-
-- source document ingestion
-- proposal/review workflow
-- catalog version snapshot/export/restore
-- capability catalog
-- semantic entity registry
-- field/semantic type registry
-- operation/resource/contract/variant catalog
-- capability embedding/vector index
-- LLM execution planner
-- semantic join/dependency graph
-- dashboard/admin API/planner API/worker
+Execution Contracts는 API 전용 모델이 아니다. 현재는 API 문서를 주 입력으로
+삼더라도, 향후 table/view/query/file/stream 같은 source type까지 수용할 수
+있어야 한다. 따라서 execution contract는 `API endpoint 중심`이 아니라
+`source -> asset -> access path -> operation -> field mapping` 구조로
+설계한다.
 
 하지 말아야 할 일:
 
 - provider HTTP client 구현
-- API key handling
-- provider pagination loop
-- provider-specific execution branch
+- API key/provider auth 실행 로직
+- provider pagination/retry loop
+- raw provider response runtime parsing
+- provider/domain keyword 선택 규칙 하드코딩
 
-provider 실행은 `apps/pubdata_mcp`가 담당한다.
+## apps/pubdata_mcp
 
-내부 경계는 다음처럼 고정한다.
+`apps/pubdata_mcp`는 실행 runtime이다.
 
-```text
-adapters/
-  admin_api/    admin/control-plane HTTP API adapter
-  planner_api/  runtime planner API adapter
-  dashboard/    UI adapter
-  worker/       optional Prefect background/manual adapter
-lib/
-  ingestion/  source document -> evidence/proposal/apply
-  planner/    question -> semantic execution plan
-  context/    planner/MCP runtime context helper
-  storage/    Postgres schema/repository
-manifests/    compose/catalog service declarations
-```
+책임:
 
-`adapters/*`는 실제 프로세스와 transport 경계만 담당한다. `lib/*`는
-semantic platform 내부 라이브러리이며 ingestion graph, planner,
-repository, runtime context처럼 여러 실행 표면에서 공유되는 코드를 둔다.
+- MCP transport 제공
+- `semantic-layer-planner-api`에서 approved plan/context 읽기
+- selected `operation_id` / `variant_id`를 provider call로 컴파일
+- provider HTTP 호출, 인증, retry, pagination, raw response parsing
+- approved field mapping으로 semantic normalization 수행
+- planner-declared binding과 integration 적용
 
-`adapters/admin_api/app/main.py`는 dashboard/admin용 FastAPI route와 HTTP 관심사만 둔다.
-`adapters/admin_api/app/gateway.py`는 route에서 `lib/storage`, `lib/planner`,
-`lib/context`로 들어가는 얇은 gateway다. 도메인 모델이나 semantic
-추론은 gateway에 두지 않는다.
+하지 말아야 할 일:
 
-`adapters/planner_api/`는 MCP/executor runtime 전용 API다. 승인된 catalog,
-execution contract, capability retrieval, endpoint check 기록, runtime
-context, execution planning만 노출한다. source upload, secret CRUD,
-ingestion, proposal review, catalog mutation은 노출하지 않는다.
+- canonical semantic definition 소유
+- global capability ranking
+- cross-domain planning
+- proposal 생성
+- catalog mutation
+- provider/domain 선택 규칙 하드코딩
 
-`lib/ingestion/` 내부는 다음 역할로 나눈다.
-
-```text
-lib/ingestion/graph.py             LangGraph graph 정의와 CLI compatibility wrapper
-lib/ingestion/graph_runtime.py     LangGraph 기반 StateGraph/add_node/add_edge/compile wrapper
-lib/ingestion/runner.py            graph 실행, repository 저장, apply, capability docs, embedding
-lib/ingestion/evidence_snapshot.py evidence snapshot payload와 파일 저장
-lib/ingestion/state.py             graph state와 ingestion/prompt version
-lib/ingestion/nodes/               graph에 연결되는 노드 entrypoint
-lib/ingestion/nodes/source.py      source loading 노드
-lib/ingestion/nodes/evidence.py    text/block/API section/evidence 노드
-lib/ingestion/nodes/catalog_context.py catalog context packaging 노드
-lib/ingestion/nodes/endpoint.py    endpoint/variant verification 노드 export
-lib/ingestion/nodes/llm_proposal.py LLM capability/execution proposal 노드 entrypoint
-lib/ingestion/nodes/proposal.py    proposal filtering/building 노드 entrypoint
-lib/ingestion/llm/proposal.py     LLM 호출, LLM context packaging, operation variant candidates
-lib/ingestion/llm/validation.py   LLM 응답과 execution contract schema 검증
-lib/ingestion/proposal/builder.py proposal envelope, capability closure, proposal item 생성
-lib/ingestion/source_loader.py     원천 파일 bytes, sha256, source id, manifest/sidecar metadata
-lib/ingestion/endpoint_probe.py    evidence 수집용 endpoint probe와 안전한 variant verification
-lib/ingestion/evidence.py          문서 블록에서 API section/field/example evidence 추출
-lib/ingestion/extraction.py        파일 텍스트 추출
-lib/ingestion/chunking.py          chunk helper
-```
-
-`graph.py`는 orchestration만 남기는 방향으로 유지한다. graph에 직접
-연결되는 함수는 `nodes/` 아래에 두고, source 식별, endpoint probe, LLM
-response validation, proposal closure 같은 큰 관심사를 다시 `graph.py`에
-직접 늘리지 않는다.
-
-경계 규칙:
-
-- `adapters/admin_api/`는 세부 catalog mutation을 직접 구현하지 않고 repository/domain
-  API를 호출한다.
-- `adapters/dashboard/`는 provider/domain routing 규칙을 갖지 않는다.
-- `lib/ingestion/`은 evidence 수집을 위한 endpoint probe는 할 수 있지만,
-  provider execution runtime이 되면 안 된다.
-- `lib/planner/`는 provider API를 호출하지 않는다.
-- `lib/storage/`는 semantic/domain 추론을 하지 않는다.
-- `adapters/worker/`는 ingestion을 감싸는 optional runner이며 별도 ingestion
-  구현을 갖지 않는다.
-
-## core/
+## core
 
 `core`는 도메인 없는 공통 코드만 둔다.
-
-현재 active 구조:
 
 ```text
 core/catalog
@@ -200,152 +126,89 @@ core/runtime
   runtime_db
 ```
 
-### core/catalog
+`core/*`에는 app 이름, procurement field, business rule, capability planning을
+넣지 않는다.
 
-manifest 기반 catalog loader다.
+## services
 
-사용처:
+서비스는 플랫폼 공통 기능과 control plane을 제공한다.
 
-- compose 생성
-- config validation
-- platform dashboard service 목록
-
-`services/*/manifests`와 `apps/*/manifests`를 읽어 active service와 app
-service를 계산한다.
-
-### core/contracts
-
-앱과 서비스가 공유하는 작은 계약을 둔다.
-
-현재는 execution identity가 핵심이다.
-
-- `request_id`
-- `correlation_id`
-- `run_id`
-- `resource_key`
-- `session_id`
-
-### core/runtime/mcp
-
-YAML tool spec을 읽어서 FastMCP tool로 등록하는 공통 런타임이다.
-
-현재 `apps/pubdata_mcp`가 사용한다.
-
-역할:
-
-- `apps/pubdata_mcp/specs/*.yaml` 로딩
-- handler import
-- tool input signature 생성
-- FastMCP tool 등록
-
-MCP tool 정의를 코드에 직접 하드코딩하지 않고 spec 기반으로 유지하기
-위한 최소 공통 계층이다.
-
-### core/observability
-
-공통 로그, correlation, retention helper다.
-
-`platform_api`와 `core/runtime`이 사용한다.
-
-### core/runtime
-
-공통 runtime helper다.
-
-- 시간 처리
-- Postgres 연결/URL
-- checkpoint store
-- service request/event/run store
-- app service middleware
-
-## sources/
-
-Retired. 루트 `sources/` 폴더는 더 이상 운영 source of truth가 아니다.
-
-원본 API 문서는 Semantic Platform Dashboard/API로 업로드하고, 파일 본문은
-MinIO/S3 호환 object storage에 source revision으로 저장한다. ingestion graph는
-DB의 source/revision metadata와 object storage 파일을 기준으로 실행된다.
-
-## data/
-
-로컬 runtime data와 모델 파일을 둔다.
-
-현재 중요한 경로:
+현재 주요 서비스:
 
 ```text
-data/models/embeddings/
-data/postgres/
-data/prefect/
+services/postgres
+services/redis
+services/nginx
+services/platform_api
+services/platform_dashboard
+services/embedding
+services/prefect
+services/minio
+services/qdrant
+services/semantic_layer
 ```
 
-embedding model은 컨테이너에 복사하지 않고 volume mount로 연결하는
-방향이다.
+App-required service인 `prefect`, `minio`, `qdrant`는 app/control plane이
+선언할 때만 활성화된다.
 
-## deploy/
+## deploy
 
-compose와 nginx route 같은 배포 산출물을 둔다.
-
-`deploy/compose/docker-compose.yml`은 generated file이다.
-직접 수정하지 말고 아래 명령으로 생성한다.
+`deploy/compose/docker-compose.yml`은 generated file이다. 직접 수정하지 않고
+manifest 변경 후 아래 명령으로 재생성한다.
 
 ```bash
 python3 scripts/generate_compose.py
 ```
 
-## scripts/
+## scripts
 
-외부에서 직접 호출하는 entrypoint는 두 개만 사용한다.
+외부 entrypoint:
 
 ```bash
 python3 scripts/generate_compose.py
 python3 scripts/ops.py <command>
 ```
 
-`scripts/ops/*`는 `scripts/ops.py`의 구현 모듈이다.
-CI나 shell에서 직접 호출하지 않는다.
+권장 검증:
 
-## tests/
+```bash
+python3 scripts/ops.py validate-config
+python3 scripts/ops.py lint-boundaries
+python3 scripts/ops.py check-all
+```
 
-현재 active 테스트는 두 영역이다.
+Semantic Layer 운영 명령:
+
+```bash
+python3 scripts/ops.py semantic-layer reset
+python3 scripts/ops.py semantic-layer seed-registry
+```
+
+## tests
+
+권장 테스트 구조:
 
 ```text
-tests/semantic_platform
+tests/semantic_layer
 tests/apps/pubdata_mcp
 ```
 
-`semantic_platform` 테스트는 catalog, ingestion contract, planner validation을
-검증한다.
+## tmp
 
-`pubdata_mcp` 테스트는 executor, argument validation, response
-normalization, secret redaction, MCP top-level schema를 검증한다.
-
-## tmp/
-
-퇴역 코드와 임시 산출물을 둔다.
-
-현재 보존된 퇴역 경로:
-
-```text
-tmp/retired_apps/
-tmp/retired_core/
-```
-
-`tmp` 아래 코드는 active runtime path가 아니다. 참고용으로만 본다.
-Codex는 `tmp/*` 아래 비밀이 아닌 임시 산출물을 사용자에게 다시 묻지 않고
-생성, 수정, 검증, 복사, 삭제할 수 있다. codex_manual LLM payload,
-일회성 request/response JSON, 검증 출력은 여기에 둔다. secret 값은
-`tmp/*`에 쓰지 않는다.
+`tmp/*`는 scratch/retired 영역이다. active runtime path로 import하지 않는다.
+비밀이 아닌 임시 산출물, codex_manual payload, 일회성 검증 파일은 사용자에게
+다시 묻지 않고 생성, 수정, 검증, 삭제할 수 있다.
 
 ## 설계 원칙
 
-- semantic planning은 `services/semantic_platform`
+- semantic/capability planning은 `services/semantic_layer/lib/planner`
 - provider execution은 `apps/pubdata_mcp`
 - generic runtime은 `core`
-- 운영 source documents는 Semantic Platform source registry/object storage
-- local models/runtime data는 `data`
+- source documents는 Semantic Layer source registry/object storage
 - generated compose는 `deploy/compose`
 - retired code는 `tmp`
 
 LLM은 capability 선택, not-found 판단, execution DAG 생성을 담당한다.
-runtime code는 도메인 키워드나 provider-specific 의미 판단을 하드코딩하지
-않는다. deterministic code는 승인된 contract의 validation, transform,
+Runtime code는 도메인 키워드나 provider-specific 의미 판단을 하드코딩하지
+않는다. Deterministic code는 승인된 contract의 validation, transform,
 execution, normalization만 수행한다.

@@ -28,8 +28,8 @@ downloads/
 eggs/
 .eggs/
 lib/
-!services/semantic_platform/lib/
-!services/semantic_platform/lib/**
+!services/capability_context/lib/
+!services/capability_context/lib/**
 lib64/
 parts/
 sdist/
@@ -209,6 +209,11 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+*.tsbuildinfo
 
 # PyPI configuration file
 .pypirc

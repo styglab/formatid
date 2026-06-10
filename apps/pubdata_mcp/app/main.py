@@ -15,12 +15,12 @@ async def ready(request: Request) -> JSONResponse:
 
 
 @mcp.resource(
-    "pubdata://semantic-platform",
-    name="public_data_semantic_platform",
-    description="Semantic platform catalog and runtime metadata for cross-domain public-data interoperability.",
+    "pubdata://semantic-layer",
+    name="public_data_semantic_layer",
+    description="Semantic layer catalog and runtime metadata for cross-domain public-data interoperability.",
     mime_type="application/json",
 )
-def public_data_semantic_platform() -> dict:
+def public_data_semantic_layer() -> dict:
     return load_catalog()
 
 

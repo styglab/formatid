@@ -1,0 +1,32 @@
+{
+  "app": "semantic_layer",
+  "profiles": [
+    "semantic_layer"
+  ],
+  "requires": {
+    "platform_services": [
+      "semantic-layer-api",
+      "semantic-layer-planner-api",
+      "semantic-layer-dashboard",
+      "semantic-layer-worker"
+    ]
+  },
+  "nginx_routes": [
+    {
+      "path_prefix": "/semantic-layer",
+      "upstream_service": "semantic-layer-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/semantic-layer-planner",
+      "upstream_service": "semantic-layer-planner-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/semantic-layer-dashboard",
+      "upstream_service": "semantic-layer-dashboard",
+      "upstream_port": 3000,
+      "strip_prefix": false
+    }
+  ]
+}

@@ -2,16 +2,17 @@
 
 MCP-facing runtime for public-data semantic execution.
 
-`pubdata_mcp` does not own the semantic catalog, proposal generation, canonical
+`pubdata_mcp` does not own the semantic layer catalog, proposal generation, canonical
 types, capability naming, or planning rules. It reads approved execution
-contracts from `services/semantic_platform` and executes the plan it receives.
+contracts from the `semantic_layer` service, currently implemented under
+`services/semantic_layer`, and executes the plan it receives.
 
 The current product direction is retrieval-first:
 
 ```text
 Question
-  -> semantic_platform capability retrieval
-  -> semantic_platform planner
+  -> semantic_layer capability retrieval
+  -> semantic_layer planner
   -> execution graph
   -> pubdata_mcp generic operation executor
 ```
@@ -25,13 +26,13 @@ against approved execution contracts.
 ```text
 MCP Client
   -> pubdata_mcp semantic_query
-  -> semantic_platform planner/context APIs
+  -> semantic_layer planner/context APIs
   -> pubdata_mcp generic operation executor
   -> public API
   -> normalized semantic result + evidence
 ```
 
-`semantic_platform` owns:
+`semantic_layer` owns:
 
 - source ingestion
 - catalog/proposal review
@@ -56,7 +57,7 @@ MCP Client
 ```text
 apps/pubdata_mcp/
   specs/catalog.yaml    # semantic MCP tools only
-  app/common/catalog.py # semantic_platform API client
+  app/common/catalog.py # semantic_layer API client
   app/common/execution.py
 ```
 
@@ -83,7 +84,7 @@ for validating an approved operation or variant.
 GET /semantic/execution/contracts
 ```
 
-from `semantic-platform-planner-api`, not the admin API. Runtime planning uses:
+from `semantic-layer-planner-api`, not the admin API. Runtime planning uses:
 
 ```text
 POST /semantic/planner/execution-plan

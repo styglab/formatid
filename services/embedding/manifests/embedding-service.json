@@ -10,9 +10,6 @@
   "ports": [
     "${HOST_BIND_IP:-127.0.0.1}:${EMBEDDING_SERVICE_HOST_PORT:-8020}:8000"
   ],
-  "volumes": [
-    "${EMBEDDING_MODELS_DIR:-../../data/models/embeddings}:/data/models/embeddings:ro"
-  ],
   "healthcheck": {
     "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()"],
     "interval": "10s",

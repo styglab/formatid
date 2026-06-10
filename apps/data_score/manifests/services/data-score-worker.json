@@ -1,0 +1,15 @@
+{
+  "service_name": "data-score-worker",
+  "service_type": "consumer",
+  "dockerfile": "apps/data_score/infra/image/worker.Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "apps/data_score/infra/env/app.env"
+  ],
+  "depends_on_service_healthy": [
+    "postgres",
+    "redis"
+  ]
+}

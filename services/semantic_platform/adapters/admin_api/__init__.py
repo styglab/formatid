@@ -1,1 +1,0 @@
-"""Semantic catalog API package."""

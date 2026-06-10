@@ -22,14 +22,14 @@ tools:
           description: Explicit execution-plan LLM response payload used only when LLM_MODE=codex_manual.
 
   - name: semantic_smoke_test_operation
-    description: Execute one approved semantic operation contract or operation variant with sample semantic arguments and store the endpoint check result in semantic_platform.
+    description: Execute one approved semantic operation contract or operation variant with sample semantic arguments and store the endpoint check result in semantic_layer.
     handler: apps.pubdata_mcp.app.common.catalog.semantic_smoke_test_operation
     input:
       required: []
       fields:
         operation_id:
           type: string
-          description: Approved operation_id from semantic_platform operation contracts. Optional when variant_id is provided.
+          description: Approved operation_id from semantic_layer operation contracts. Optional when variant_id is provided.
         variant_id:
           type: string
           description: Approved operation_variant id. Use this for capability-specific checks when one endpoint has multiple semantic capabilities or control values.
@@ -39,5 +39,5 @@ tools:
           default: {}
         persist:
           type: boolean
-          description: Store the check result in semantic_platform.
+          description: Store the check result in semantic_layer.
           default: true

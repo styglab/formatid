@@ -1,0 +1,22 @@
+{
+  "service_name": "data-score-dashboard",
+  "service_type": "api",
+  "dockerfile": "apps/data_score/infra/image/dashboard.Dockerfile",
+  "build_context": "../..",
+  "restart": "unless-stopped",
+  "env_files": [
+    "apps/data_score/infra/env/app.env"
+  ],
+  "depends_on_service_healthy": [
+    "data-score-api"
+  ],
+  "ports": [
+    "${HOST_BIND_IP:-127.0.0.1}:${DATA_SCORE_DASHBOARD_HOST_PORT:-3025}:3000"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/', timeout=2).read()"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

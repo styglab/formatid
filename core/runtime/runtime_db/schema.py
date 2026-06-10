@@ -71,7 +71,6 @@ async def ensure_service_runs_table(conn: Any) -> None:
         )
     await conn.commit()
 
-
 async def ensure_service_logs_table(conn: Any) -> None:
     async with conn.cursor() as cursor:
         await cursor.execute(
@@ -190,33 +189,6 @@ async def ensure_service_events_table(conn: Any) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_service_events_event_created_at
                 ON service_events (event_name, created_at DESC)
-            """
-        )
-    await conn.commit()
-
-
-async def ensure_external_api_quota_blocks_table(conn: Any) -> None:
-    async with conn.cursor() as cursor:
-        await cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS external_api_quota_blocks (
-                id BIGSERIAL PRIMARY KEY,
-                app TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                api_name TEXT NOT NULL,
-                reason TEXT NOT NULL,
-                blocked_until TIMESTAMPTZ NOT NULL,
-                detail JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE (app, provider, api_name)
-            )
-            """
-        )
-        await cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_external_api_quota_blocks_until
-                ON external_api_quota_blocks (blocked_until DESC)
             """
         )
     await conn.commit()
