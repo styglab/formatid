@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from apps.data_score.app.flows.evaluation import run_evaluation
+from apps.data_score.domain.flows.evaluation import run_evaluation
 
 
 CSV_TEXT = """company_name,description,category

@@ -1,0 +1,1 @@
+"""Manual authoring command services."""

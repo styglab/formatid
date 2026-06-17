@@ -7,7 +7,7 @@ from scripts.ops.boundaries import lint_boundaries
 from scripts.ops.catalog import inspect_catalog
 from scripts.ops.check_all import check_all
 from scripts.ops.checkpoints import fetch_checkpoints
-from scripts.ops.semantic_layer import reset_semantic_layer, seed_semantic_registry
+from scripts.ops.semantic_platform import reset_semantic_platform, seed_semantic_registry
 from scripts.ops.observability import prune_observability_data
 from scripts.ops.smoke import run_smoke_test
 from scripts.ops.validation import validate_config
@@ -31,16 +31,17 @@ def build_ops_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("check-all", help="run compose, config, boundary, compile, and docker compose checks")
     subparsers.add_parser("catalog", help="list available platform and app services")
     subparsers.add_parser("smoke", help="run docker compose smoke test")
-    semantic_layer_parser = subparsers.add_parser(
-        "semantic-layer",
-        help="operate semantic layer catalog",
+    semantic_platform_parser = subparsers.add_parser(
+        "semantic-platform",
+        help="operate semantic platform catalog",
     )
-    semantic_layer_subparsers = semantic_layer_parser.add_subparsers(
-        dest="semantic_layer_command",
+    semantic_platform_subparsers = semantic_platform_parser.add_subparsers(
+        dest="semantic_platform_command",
         required=True,
     )
-    semantic_layer_subparsers.add_parser("reset", help="clear semantic layer catalog data")
-    semantic_layer_subparsers.add_parser("seed-registry", help="seed core semantic type registry")
+    semantic_platform_subparsers.add_parser("reset", help="clear semantic platform catalog data")
+    semantic_platform_subparsers.add_parser("seed-registry", help="seed core semantic type registry")
+
     return parser
 
 
@@ -61,9 +62,9 @@ def run_ops_command(args: argparse.Namespace) -> object | None:
         return inspect_catalog()
     if args.command == "smoke":
         return run_smoke_test()
-    if args.command == "semantic-layer":
-        if args.semantic_layer_command == "reset":
-            return reset_semantic_layer()
-        if args.semantic_layer_command == "seed-registry":
+    if args.command == "semantic-platform":
+        if args.semantic_platform_command == "reset":
+            return reset_semantic_platform()
+        if args.semantic_platform_command == "seed-registry":
             return seed_semantic_registry()
     raise SystemExit(f"unknown command: {args.command}")

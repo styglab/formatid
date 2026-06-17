@@ -1,12 +1,12 @@
 {
   "service_name": "data-score-api",
   "service_type": "api",
-  "dockerfile": "apps/data_score/infra/image/api.Dockerfile",
+  "dockerfile": "apps/data_score/adapters/api/infra/image/Dockerfile",
   "build_context": "../..",
   "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
   "restart": "unless-stopped",
   "env_files": [
-    "apps/data_score/infra/env/app.env"
+    "apps/data_score/adapters/api/infra/env/app.env"
   ],
   "depends_on_service_healthy": [
     "postgres",

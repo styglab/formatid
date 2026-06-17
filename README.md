@@ -25,7 +25,7 @@ Natural language
   and cross-app contracts.
 - `services/*`: platform services and backing capabilities such as Nginx,
   Postgres, Redis, platform API, platform dashboard, embedding service, and
-  `services/semantic_layer`.
+  `services/semantic_platform`.
 - `apps/*`: app orchestration, business rules, persistence, ontology, semantic transformers, and user-facing AI apps.
 
 See [docs/folder_structure_ko.md](docs/folder_structure_ko.md) for the current
@@ -40,7 +40,7 @@ Layer rule:
 ## Current Apps
 
 - `apps/pubdata_mcp`: MCP runtime for approved semantic execution contracts
-  produced by `services/semantic_layer`.
+  produced by `services/semantic_platform`.
 
 ## Platform Services
 
@@ -57,7 +57,7 @@ only when an app or platform control plane declares them.
 
 ## Semantic Layer
 
-For public API orchestration, `services/semantic_layer` is the declarative
+For public API orchestration, `services/semantic_platform` is the declarative
 semantic layer:
 
 - Canonical Semantic Model: shared semantic types and relationships.
@@ -76,7 +76,7 @@ runtime and deterministic contract interpreter.
 ```text
 Question
   -> pubdata_mcp semantic_query
-  -> semantic_layer capability retrieval + planner
+  -> semantic_platform capability retrieval + planner
   -> semantic execution graph
   -> pubdata_mcp contract interpreter
   -> provider APIs

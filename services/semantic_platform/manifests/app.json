@@ -1,0 +1,32 @@
+{
+  "app": "semantic_platform",
+  "profiles": [
+    "semantic_platform"
+  ],
+  "requires": {
+    "platform_services": [
+      "semantic-platform-api",
+      "semantic-platform-planner-api",
+      "semantic-platform-dashboard",
+      "semantic-platform-worker"
+    ]
+  },
+  "nginx_routes": [
+    {
+      "path_prefix": "/semantic-platform",
+      "upstream_service": "semantic-platform-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/semantic-platform-planner",
+      "upstream_service": "semantic-platform-planner-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/semantic",
+      "upstream_service": "semantic-platform-dashboard",
+      "upstream_port": 3000,
+      "strip_prefix": false
+    }
+  ]
+}

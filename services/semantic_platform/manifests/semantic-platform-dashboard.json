@@ -1,0 +1,13 @@
+{
+  "service_name": "semantic-platform-dashboard",
+  "service_type": "api",
+  "dockerfile": "services/semantic_platform/adapters/dashboard/infra/image/Dockerfile",
+  "build_context": "../..",
+  "restart": "unless-stopped",
+  "ports": [
+    "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_DASHBOARD_HOST_PORT:-8018}:3000"
+  ],
+  "depends_on_service_healthy": [
+    "semantic-platform-api"
+  ]
+}

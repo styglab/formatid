@@ -1,7 +1,7 @@
 tools:
   - name: semantic_query
     description: Plan a natural-language public-data question as a provider-neutral semantic execution DAG and optionally execute mapped provider tools.
-    handler: apps.pubdata_mcp.app.common.catalog.semantic_query
+    handler: apps.pubdata_mcp.domain.catalog.semantic_query
     input:
       required:
         - query
@@ -22,8 +22,8 @@ tools:
           description: Explicit execution-plan LLM response payload used only when LLM_MODE=codex_manual.
 
   - name: semantic_smoke_test_operation
-    description: Execute one approved semantic operation contract or operation variant with sample semantic arguments and store the endpoint check result in semantic_layer.
-    handler: apps.pubdata_mcp.app.common.catalog.semantic_smoke_test_operation
+    description: Execute one approved semantic operation contract or operation variant with sample semantic arguments and store the endpoint check result in semantic_platform.
+    handler: apps.pubdata_mcp.domain.catalog.semantic_smoke_test_operation
     input:
       required: []
       fields:
@@ -39,5 +39,5 @@ tools:
           default: {}
         persist:
           type: boolean
-          description: Store the check result in semantic_layer.
+          description: Store the check result in semantic_platform.
           default: true

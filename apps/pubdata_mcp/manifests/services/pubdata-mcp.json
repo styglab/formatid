@@ -1,15 +1,15 @@
 {
   "service_name": "pubdata-mcp",
   "service_type": "api",
-  "dockerfile": "apps/pubdata_mcp/infra/image/Dockerfile",
+  "dockerfile": "apps/pubdata_mcp/adapters/api/infra/image/Dockerfile",
   "build_context": "../..",
   "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
   "restart": "unless-stopped",
   "env_files": [
-    "apps/pubdata_mcp/infra/env/app.env"
+    "apps/pubdata_mcp/adapters/api/infra/env/app.env"
   ],
   "depends_on_service_healthy": [
-    "semantic-layer-planner-api"
+    "semantic-platform-planner-api"
   ],
   "ports": [
     "${HOST_BIND_IP:-127.0.0.1}:${PUBDATA_MCP_HOST_PORT:-8015}:8000"

@@ -299,19 +299,27 @@ Tabs:
 
 ## Project Structure
 
-Repository layer rule에 맞춰 `apps/data_score` 아래에 앱 책임을 둔다.
+Repository layer rule에 맞춰 `apps/data_score` 아래에 앱 책임을 두고,
+컨테이너 진입점은 `adapters/`에 분리한다.
 
 ```text
 apps/data_score/
-  app/
+  adapters/
+    api/
+      main.py        # API adapter entrypoint
+      infra/         # image/env for API container
+    dashboard/
+      app/           # Next.js dashboard runtime
+      infra/         # image/env for dashboard container
+    worker/
+      main.py        # worker adapter entrypoint
+      infra/         # image/env for worker container
+  domain/
     flows/           # LangGraph orchestration: upload -> profile -> dq -> judge -> score -> report
     tasks/           # execution boundaries
     steps/           # pure profiling, dq, scoring, report logic
     repositories/    # persistence
     semantic/        # rubric, judge contracts, semantic quality models
-    service/         # API runner helpers
-  frontend/
-  infra/
   manifests/
     app.json
     services/
@@ -368,7 +376,7 @@ if critical traditional issue exists
   -> still generate report with blocking issue
 ```
 
-LangGraph should orchestrate the evaluation state from the first MVP. DuckDB, Polars, DQ rules, scoring, and repository writes should remain normal Python functions or services under `steps/` and `repositories/`.
+LangGraph should orchestrate the evaluation state from the first MVP. DuckDB, Polars, DQ rules, scoring, and repository writes should remain normal Python functions or services under `domain/steps/` and `domain/repositories/`.
 
 ### What Not To Put In LangGraph
 

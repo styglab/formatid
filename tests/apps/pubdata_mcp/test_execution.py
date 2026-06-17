@@ -11,8 +11,8 @@ if "requests" not in sys.modules:
     requests_stub.Timeout = TimeoutError
     sys.modules["requests"] = requests_stub
 
-from apps.pubdata_mcp.app.common import catalog
-from apps.pubdata_mcp.app.common.execution import (
+from apps.pubdata_mcp.domain import catalog
+from apps.pubdata_mcp.domain.execution import (
     _contract_items,
     _contract_payload_error,
     _generic_items,
