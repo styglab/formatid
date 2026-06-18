@@ -52,6 +52,13 @@ export type ExecutionSource = {
   draft_snapshot?: ExecutionSource | null;
   approved_snapshot?: ExecutionSource | null;
   pending_proposal_id?: string;
+  asset_count?: number;
+  operation_count?: number;
+  field_count?: number;
+  latest_run_id?: string;
+  latest_run_stage?: string;
+  latest_run_status?: string;
+  pending_proposal_count?: number;
 };
 
 export type ExecutionAsset = {
@@ -269,6 +276,19 @@ export type OnboardingRun = {
   proposal_count: number;
   pending_proposal_count: number;
   suggestion_status: string;
+  preparation_status?: string;
+  worker_progress_percent?: number | null;
+  task_count?: number;
+  completed_task_count?: number;
+  draft_ready_count?: number;
+  draft_failed_count?: number;
+  draft_active_count?: number;
+  draft_queued_count?: number;
+  current_stage_task_count?: number;
+  current_stage_ready_count?: number;
+  current_stage_failed_count?: number;
+  current_stage_completed_count?: number;
+  worker_current_task?: string;
   created_at?: string | null;
   updated_at?: string | null;
 };

@@ -1,57 +1,44 @@
 from __future__ import annotations
 
+import asyncio
 import os
-from prefect import flow, task
+import queue
+import threading
+from typing import Any
 
-from services.semantic_platform.internal.storage import SemanticLayerRepository
+from prefect.deployments import run_deployment
+
+from services.semantic_platform.adapters.worker.flows.onboarding_pipeline import (
+    run_onboarding_pipeline,
+)
 
 
 ONBOARDING_FLOW_NAME = "run-onboarding-pipeline"
 ONBOARDING_DEPLOYMENT_NAME = "semantic-platform-onboarding"
 
 
-@task
-def bootstrap_source_review(run_id: str) -> None:
-    repository = SemanticLayerRepository()
-    repository.update_onboarding_run_stage(
-        run_id,
-        current_stage="source_review",
-        stage_status="in_progress",
-        next_action="Review source evidence and complete source review tasks.",
-        status="started",
-    )
-
-
-@task
-def discover_operations_and_fields(run_id: str) -> None:
-    repository = SemanticLayerRepository()
-    repository.update_onboarding_run_stage(
-        run_id,
-        current_stage="asset_discovery",
-        stage_status="pending",
-        next_action="Generate AI drafts for source assets and access paths before structure review.",
-        status="started",
-    )
-
-
-@task
-def prepare_semantic_mapping_tasks(run_id: str) -> None:
-    repository = SemanticLayerRepository()
-    repository.update_onboarding_run_stage(
-        run_id,
-        current_stage="structure_review",
-        stage_status="pending",
-        next_action="Review extracted structures and fields, then continue to semantic mapping.",
-        status="started",
-    )
-
-
-@flow(name=ONBOARDING_FLOW_NAME)
-def run_onboarding_pipeline(run_id: str) -> dict[str, str]:
-    bootstrap_source_review(run_id)
-    discover_operations_and_fields(run_id)
-    prepare_semantic_mapping_tasks(run_id)
-    return {"run_id": run_id, "status": "stage_scaffold_ready"}
+def submit_onboarding_run(run_id: str) -> dict[str, Any]:
+    if not run_id:
+        return {"status": "skipped", "reason": "missing_run_id"}
+    deployment_name = f"{ONBOARDING_FLOW_NAME}/{ONBOARDING_DEPLOYMENT_NAME}"
+    try:
+        flow_run = run_deployment(name=deployment_name, parameters={"run_id": run_id}, timeout=0)
+        if asyncio.iscoroutine(flow_run):
+            try:
+                flow_run = asyncio.run(flow_run)
+            except RuntimeError:
+                flow_run = _run_coro_in_thread(flow_run)
+        return {
+            "status": "submitted",
+            "deployment": deployment_name,
+            "flow_run_id": str(getattr(flow_run, "id", "")),
+        }
+    except Exception as exc:  # pragma: no cover - runtime integration fallback
+        return {
+            "status": "not_submitted",
+            "deployment": deployment_name,
+            "reason": str(exc),
+        }
 
 
 def main() -> None:
@@ -65,3 +52,21 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _run_coro_in_thread(coro: Any) -> Any:
+    result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
+
+    def _runner() -> None:
+        try:
+            result_queue.put(asyncio.run(coro))
+        except Exception as exc:  # pragma: no cover - runtime integration fallback
+            result_queue.put(exc)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    result = result_queue.get()
+    if isinstance(result, Exception):
+        raise result
+    return result

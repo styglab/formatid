@@ -18,6 +18,8 @@ export function SourcesTable({ items, selectedId, onSelect }: SourcesTableProps)
             <th className="px-4 py-3 font-medium">Name</th>
             <th className="px-4 py-3 font-medium">Provider</th>
             <th className="px-4 py-3 font-medium">Type</th>
+            <th className="px-4 py-3 font-medium">Latest Run</th>
+            <th className="px-4 py-3 font-medium">Coverage</th>
             <th className="px-4 py-3 font-medium">Status</th>
           </tr>
         </thead>
@@ -37,10 +39,19 @@ export function SourcesTable({ items, selectedId, onSelect }: SourcesTableProps)
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{display.provider || "-"}</td>
                 <td className="px-4 py-3 text-muted-foreground">{display.source_type}</td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  <div>{source.latest_run_stage || "-"}</div>
+                  <div className="mt-1 text-xs">{source.latest_run_status || "no run"}</div>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  <div>{source.asset_count || 0} assets</div>
+                  <div className="mt-1 text-xs">{source.field_count || 0} fields</div>
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={semanticStatusBadgeVariant(display.status)}>{display.status || "unknown"}</Badge>
                     {source.draft_snapshot ? <Badge variant="warning">Draft</Badge> : null}
+                    {(source.pending_proposal_count || 0) > 0 ? <Badge variant="warning">{source.pending_proposal_count} pending</Badge> : null}
                   </div>
                 </td>
               </tr>

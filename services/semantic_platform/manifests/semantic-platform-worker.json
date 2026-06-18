@@ -10,6 +10,8 @@
     "services/semantic_platform/adapters/admin_api/infra/env/app.env"
   ],
   "depends_on_service_healthy": [
-    "prefect-server"
+    "prefect-server",
+    "embedding-service",
+    "qdrant"
   ]
 }

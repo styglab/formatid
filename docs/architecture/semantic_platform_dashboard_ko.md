@@ -10,43 +10,21 @@
 ## 현재 구조
 
 ```text
-Home
-  Overview
-
-Onboarding
-  Sources
-  Onboarding Runs
-
-Semantic Platform
-  Semantic Types
-  Canonical Model
-  Mappings
-  Lineage
-
-Agent Layer
-  Capabilities
-  Operation Catalog
-  Variants
-
+Sources
+Workspaces
+Proposal Bundles
+Semantic Model
+Execution Registry
 Governance
-  Proposal Bundles
-  Proposals
-  Reviews
-  Audit
-
 Release
-  Publish
-
-Reference
-  Prototype
 ```
 
 ## 현재 원칙
 
-### 1. Onboarding과 Semantic Platform을 분리
+### 1. Sources와 Workspaces를 분리
 
-- Onboarding은 source/run workflow
-- Semantic Platform은 의미 모델링
+- Sources는 등록 자원 축
+- Workspaces는 진행 중 authoring workflow 축
 
 ### 2. Agent Layer를 따로 둔다
 
@@ -143,8 +121,9 @@ app/semantic/reference/*
 
 - 개요: [semantic_platform_overview_ko.md](/workspace/docs/architecture/semantic_platform_overview_ko.md)
 - 구현 현황: [semantic_platform_implementation_ko.md](/workspace/docs/architecture/semantic_platform_implementation_ko.md)
+- worker pipeline: [semantic_platform_worker_pipeline_ko.md](/workspace/docs/architecture/semantic_platform_worker_pipeline_ko.md)
 
-## 방향 전환: Mapping 중심에서 Onboarding Run 중심으로
+## 방향 전환: Mapping 중심에서 Workspace 중심으로
 
 현재 `Work Queue`와 `Mappings` UX는 field mapping authoring에는 유효하지만,
 제품의 중심 workflow로 보기에는 범위가 좁다. 앞으로의 중심 화면은
@@ -153,24 +132,13 @@ app/semantic/reference/*
 새 IA:
 
 ```text
-Home
-  Overview
-
-Onboarding
-  Sources
-  Onboarding Runs
-
+Sources
+Workspaces
+Proposal Bundles
+Semantic Model
 Execution Registry
-  Capabilities
-  Operations
-  Variants
-  Capability Bindings
-
 Governance
-  Proposal Bundles
-  Proposals
-  Reviews
-  Audit
+Release
 ```
 
 `Work Queue`는 다음 역할로 낮춘다.
@@ -195,12 +163,13 @@ Source
 즉 API형 source는 operation view가 보이고, CSV형 source는 구조/필드 중심으로
 진행된다.
 
-### Onboarding Runs 화면
+### Workspace 화면
 
 목적:
 
-- source upload/ingestion run 단위 진행 상황을 보여준다.
-- evidence, discovered assets, structures, optional operations, suggestions, proposals를 한 화면에서 연결한다.
+- source evidence부터 semantic model 승인, binding 승인, bundle review까지의
+  진행 상황을 보여준다.
+- supporting context와 현재 단계 작업을 같은 화면에서 연결한다.
 
 필수 정보:
 

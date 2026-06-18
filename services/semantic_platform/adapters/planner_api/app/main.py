@@ -5,7 +5,12 @@ from typing import Any
 from fastapi import FastAPI
 
 from services.semantic_platform.internal.context import build_runtime_context
-from services.semantic_platform.internal.planner import build_not_found_plan, validate_plan
+from services.semantic_platform.internal.planner import (
+    build_execution_plan,
+    load_execution_contracts,
+    record_endpoint_check as record_endpoint_check_service,
+    validate_plan,
+)
 
 
 app = FastAPI(title="Semantic Platform Planner API")
@@ -23,28 +28,22 @@ def runtime_context() -> dict[str, Any]:
 
 @app.post("/plan")
 def plan(payload: dict[str, Any]) -> dict[str, Any]:
-    return build_not_found_plan()
+    return build_execution_plan(payload)
 
 
 @app.post("/semantic/planner/execution-plan")
 def semantic_execution_plan(payload: dict[str, Any]) -> dict[str, Any]:
-    return build_not_found_plan()
+    return build_execution_plan(payload)
 
 
 @app.get("/semantic/execution/contracts")
 def execution_contracts() -> dict[str, Any]:
-    return {
-        "capability_implementations": {},
-        "operation_field_mappings": {},
-        "operation_contracts": {},
-        "operation_variants": {},
-        "resources": {},
-    }
+    return load_execution_contracts()
 
 
 @app.post("/semantic/execution/checks")
 def record_endpoint_check(payload: dict[str, Any]) -> dict[str, Any]:
-    return {"status": "skipped", "reason": "storage_schema_not_initialized", "check": payload}
+    return record_endpoint_check_service(payload)
 
 
 @app.post("/plans/validate")

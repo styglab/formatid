@@ -11,9 +11,10 @@ the planner plane.
 
 ```text
 API documents / manual authoring
-  -> context change proposals
+  -> meaning registry
+  -> canonical model
+  -> source bindings
   -> governance review
-  -> canonical semantic model
   -> semantic platform graph
   -> LLM execution planning
   -> app executor
@@ -138,14 +139,16 @@ wizard.
 
 Recommended stages:
 
-1. `source_review`
+1. `source_evidence_review`
 2. `asset_discovery`
 3. `structure_review`
-4. `semantic_mapping`
-5. `controls_and_variants`
-6. `operation_and_binding_modeling`
-7. `proposal_review`
-8. `publish_readiness`
+4. `registry_gap_detection`
+5. `semantic_type_authoring`
+6. `canonical_model_authoring`
+7. `mapping_authoring`
+8. `variant_and_binding_authoring`
+9. `proposal_review`
+10. `publish_readiness`
 
 Recommended task behavior:
 
@@ -169,6 +172,28 @@ This means the system should distinguish:
   - variants
   - capabilities
   - capability bindings
+
+It should also distinguish three registry layers:
+
+- `Meaning Registry`
+  - semantic types, glossary/business meaning, aliases, representation constraints
+- `Canonical Model`
+  - entities, canonical attributes, relations, identity systems
+- `Source Binding`
+  - field mappings, control semantics, operation variants, capability bindings
+
+Binding work must be dependency-aware. A field mapping may draft against a
+proposed semantic type, but it must not be considered complete or publishable
+until the required semantic type and canonical attribute references are
+approved.
+
+For workflow and dashboard UX, these three registry layers are reviewed as two
+phases:
+
+- `Semantic Model`
+  - semantic types and canonical links reviewed together
+- `Source Binding`
+  - field mappings, control semantics, variants, and capability bindings
 
 Control fields need a dedicated path. They are not just ordinary field mappings;
 they can imply semantic controls or operation variants, so onboarding should

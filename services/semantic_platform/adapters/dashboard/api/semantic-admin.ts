@@ -76,6 +76,13 @@ export function getExecutionSource(sourceId: string) {
   return semanticAdminRequest<ExecutionSource>(`/api/execution-sources/${sourceId}`);
 }
 
+export function startWorkspace(sourceId: string, reviewer = "dashboard") {
+  return semanticAdminRequest<{ run: OnboardingRun; trigger: Record<string, unknown> }>(`/api/execution-sources/${sourceId}/start-workspace`, {
+    method: "POST",
+    body: JSON.stringify({ reviewer })
+  });
+}
+
 export function listExecutionSourcesPage(params: { query?: string; status?: string; page?: number; pageSize?: number }) {
   const search = new URLSearchParams();
   if (params.query) search.set("query", params.query);
@@ -154,6 +161,20 @@ export function getOnboardingRun(runId: string) {
 
 export function resumeOnboardingRun(runId: string, reviewer = "dashboard") {
   return semanticAdminRequest<{ run: OnboardingRun; trigger: Record<string, unknown> }>(`/api/onboarding-runs/${runId}/resume`, {
+    method: "POST",
+    body: JSON.stringify({ reviewer })
+  });
+}
+
+export function pauseOnboardingRun(runId: string, reviewer = "dashboard") {
+  return semanticAdminRequest<{ run: OnboardingRun }>(`/api/onboarding-runs/${runId}/pause`, {
+    method: "POST",
+    body: JSON.stringify({ reviewer })
+  });
+}
+
+export function cancelOnboardingRun(runId: string, reviewer = "dashboard") {
+  return semanticAdminRequest<{ run: OnboardingRun }>(`/api/onboarding-runs/${runId}/cancel`, {
     method: "POST",
     body: JSON.stringify({ reviewer })
   });

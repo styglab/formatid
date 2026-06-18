@@ -160,10 +160,42 @@ Reference
 
 1. dashboard 핵심 화면 완성도 향상
 2. source onboarding / schema review / mapping UX 강화
-3. governance depth 보강
-4. planner/runtime plane 실구현
+3. semantic model / source binding 승인 흐름 정리
+4. dependency-aware worker pipeline 실구현
+5. governance depth 보강
+6. planner/runtime plane 실구현
+
+## 다음 구조 원칙
+
+지금부터 onboarding / governance / publish는 아래 원칙으로 보는 편이 맞다.
+
+- `Semantic Model Registry Layers`
+  - `Meaning Registry`
+    - semantic type, glossary/business meaning
+  - `Canonical Model`
+    - entity, canonical attribute, relation, identity
+- `Source Binding`
+  - field mapping, control semantics, variant, capability binding
+
+다만 operator workflow와 dashboard에서는 `Meaning Registry`와
+`Canonical Model`을 하나의 `Semantic Model` 승인 단계로 묶는 편이 더 낫다.
+
+핵심은 binding이 approved semantic model 없이 완료되지 않게 하는 것이다.
+
+proposal / task에는 최소 아래 dependency metadata가 필요하다.
+
+- `depends_on_proposal_ids`
+- `resolution_basis`
+  - `approved`
+  - `proposed`
+  - `missing`
+- `dependency_status`
+  - `ready`
+  - `blocked`
+  - `needs_rebase`
 
 ## 관련 문서
 
 - 개요: [semantic_platform_overview_ko.md](/workspace/docs/architecture/semantic_platform_overview_ko.md)
 - 대시보드 운영/UX: [semantic_platform_dashboard_ko.md](/workspace/docs/architecture/semantic_platform_dashboard_ko.md)
+- worker pipeline: [semantic_platform_worker_pipeline_ko.md](/workspace/docs/architecture/semantic_platform_worker_pipeline_ko.md)

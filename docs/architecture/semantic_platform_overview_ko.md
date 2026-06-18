@@ -9,11 +9,10 @@
 
 ```text
 API documents / manual authoring
-  -> semantic types
+  -> meaning registry
   -> canonical model
-  -> mappings
-  -> capabilities
-  -> operations / variants
+  -> source bindings
+  -> capabilities / operations / variants
   -> governance
   -> planner context
   -> app executor
@@ -108,6 +107,56 @@ planner-facing intent.
 - lifecycle
 - provenance
 
+## Registry Layers 와 Operator Workflow
+
+source onboarding과 semantic authoring을 안정적으로 운영하려면 registry
+자체는 세 층으로 분리하고, operator workflow는 두 단계로 묶는 편이 좋다.
+
+### 1. Meaning Registry
+
+- semantic type
+- glossary/business meaning
+- alias
+- representation constraint
+
+의미 정의는 source field와 직접 결합하지 않는다.
+
+### 2. Canonical Model
+
+- entity
+- canonical attribute
+- relation
+- identity system
+
+canonical model은 meaning registry를 이용해 비즈니스 객체 구조를 정의한다.
+
+### 3. Source Binding
+
+- field mapping
+- control semantics
+- operation variant
+- capability binding
+
+source binding은 승인된 meaning / canonical model을 이용해 source-specific
+binding을 만든다.
+
+### Operator Workflow
+
+registry는 세 층으로 남기되, 사용자 workflow는 아래 두 단계가 더 낫다.
+
+1. `Semantic Model`
+- meaning registry
+- canonical model
+
+2. `Source Binding`
+- field mapping
+- control semantics
+- operation variant
+- capability binding
+
+즉 semantic type과 canonical attribute/entity를 데이터 모델 차원에서는 분리하되,
+review/publish workflow에서는 같은 semantic model 승인 단계에서 함께 다룬다.
+
 ## 두 가지 관점
 
 ### 개념/런타임 관점
@@ -127,9 +176,10 @@ Semantic Types
 Source
 -> Asset / Access Path
 -> Schema / Field Paths
--> Semantic Types
--> Canonical Links
--> Mappings
+-> Registry Gap Detection
+-> Meaning Registry
+-> Canonical Model
+-> Source Bindings
 -> Capabilities
 -> Governance
 ```
@@ -160,6 +210,7 @@ planner plane은 mutation을 노출하지 않는다.
 
 - 구현 현황: [semantic_platform_implementation_ko.md](/workspace/docs/architecture/semantic_platform_implementation_ko.md)
 - 대시보드 운영/UX: [semantic_platform_dashboard_ko.md](/workspace/docs/architecture/semantic_platform_dashboard_ko.md)
+- worker pipeline: [semantic_platform_worker_pipeline_ko.md](/workspace/docs/architecture/semantic_platform_worker_pipeline_ko.md)
 
 ## Source Onboarding Run 중심 Workflow
 
@@ -198,14 +249,11 @@ Source upload
 -> onboarding run 생성
 -> evidence snapshot 생성
 -> asset / access path / schema / field / control discovery
--> AI suggestion batch 생성
+-> semantic model drafting
+-> semantic model approval
+-> source binding drafting
+-> source binding approval
 -> proposal bundle 생성
-   - semantic type proposals
-   - canonical model proposals
-   - field mapping + transform proposals
-   - operation variant proposals
-   - capability proposals
-   - capability-operation binding proposals
 -> reviewer가 proposal 또는 bundle 단위로 승인
 -> approved runtime snapshot publish
 -> planner/executor는 approved snapshot만 사용
@@ -221,7 +269,7 @@ Source-driven proposal, platform-governed approval
 Model, Capability, Operation Variant, Mapping, Capability Binding은 모두
 review/publish lifecycle을 통과해야 runtime context가 된다.
 
-## Stage/Task 기반 Onboarding Workflow
+## Dependency-aware Onboarding Workflow
 
 onboarding은 단순 업로드 후 배치 실행 화면이 아니라, 사용자가 현재 단계와
 작업 단위를 따라가며 진행하는 guided workflow여야 한다.
@@ -237,25 +285,53 @@ onboarding은 단순 업로드 후 배치 실행 화면이 아니라, 사용자�
 - `Proposal Bundle`
   - run에서 생성된 proposal 묶음
 
+핵심 dependency 원칙:
+
+- `field mapping`은 approved semantic type / canonical attribute 없이
+  완료될 수 없다
+- worker는 끝까지 draft를 생성할 수 있지만, draft는 dependency 상태를
+  명시해야 한다
+- semantic type 또는 canonical model proposal이 reject / merge / split /
+  rename되면 downstream binding draft는 `blocked` 또는 `needs_rebase`가
+  된다
+
+proposal / task가 가져야 할 최소 dependency metadata:
+
+- `depends_on_proposal_ids`
+- `resolution_basis`
+  - `approved`
+  - `proposed`
+  - `missing`
+- `dependency_status`
+  - `ready`
+  - `blocked`
+  - `needs_rebase`
+- `review_impact`
+  - `blocks_mapping`
+  - `blocks_binding`
+  - `needs_rebase`
+
 권장 stage:
 
-1. `source_review`
-2. `asset_discovery`
-3. `structure_review`
-4. `semantic_mapping`
-5. `controls_and_variants`
-6. `operation_and_binding_modeling`
-7. `proposal_review`
-8. `publish_readiness`
+1. `source_evidence_review`
+2. `registry_gap_detection`
+3. `semantic_type_authoring`
+4. `canonical_model_authoring`
+5. `registry_review`
+6. `mapping_authoring`
+7. `variant_and_binding_authoring`
+8. `proposal_review`
+9. `publish_readiness`
 
 권장 task 예:
 
 - `confirm_source_metadata`
-- `discover_assets`
-- `review_extracted_structures`
-- `resolve_unmapped_fields`
+- `detect_registry_gaps`
+- `author_semantic_types`
+- `author_canonical_attributes`
+- `resolve_field_mappings`
 - `classify_control_fields`
-- `review_operation_and_binding_candidates`
+- `review_binding_candidates`
 - `approve_proposal_bundle`
 - `publish_runtime_snapshot`
 
