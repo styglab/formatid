@@ -1,6 +1,7 @@
 import unittest
 
 from services.context_platform.internal.ingestion.canonical_reconciliation import collect_source_terms
+from services.context_platform.internal.ingestion.canonical_reconciliation import build_manual_canonical_reconciliation_request
 from services.context_platform.internal.ingestion.canonical_reconciliation import build_linkml_fragment
 from services.context_platform.internal.ingestion.canonical_reconciliation import build_linkml_fragment_from_decisions
 from services.context_platform.internal.ingestion.canonical_reconciliation import reconcile_source_term
@@ -216,6 +217,22 @@ class CanonicalReconciliationTest(unittest.TestCase):
         self.assertEqual(normalized["decisions"][0]["proposed_canonical"]["datatype"], "decimal")
         self.assertEqual(normalized["concept_decisions"][0]["concept_key"], "concept.finance.revenue")
         self.assertEqual(normalized["representation_schema_decisions"][0]["representation_schema_key"], "schema.finance.revenue.money_amount")
+
+    def test_manual_request_instructs_scope_and_value_domain_invariants(self) -> None:
+        request = build_manual_canonical_reconciliation_request(
+            run_id="run_1",
+            source={"id": "src_1"},
+            document={"id": "doc_1"},
+            operations=[],
+            document_fields=[],
+            context={"classes": [], "slots": [], "class_slot_usages": [], "relations": []},
+        )
+        instructions = "\n".join(request["instructions"])
+
+        self.assertIn("concept.identifier.* -> identifier", instructions)
+        self.assertIn("schema.*.code", instructions)
+        self.assertIn("meaning_scope_policy", request["modeling_contract"])
+        self.assertIn("value_domain_key", request["response_contract"]["representation_schema_decisions"][0]["representation_schema"])
 
     def test_manual_skip_does_not_keep_fallback_canonical_class(self) -> None:
         terms = [

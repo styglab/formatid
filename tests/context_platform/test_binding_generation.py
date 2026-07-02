@@ -325,6 +325,22 @@ class BindingGenerationTest(unittest.TestCase):
         self.assertEqual(request["legacy_type"], "binding_generation")
         self.assertTrue(any(item["rule_id"] == "parse_decimal" for item in request["approved_rule_catalog"]))
 
+    def test_manual_request_instructs_subject_context_and_code_domain_preservation(self) -> None:
+        request = build_manual_binding_generation_request(
+            run_id="run_1",
+            source={"id": "src_1"},
+            document={"id": "doc_1"},
+            operations=[],
+            document_fields=[],
+            canonical_reconciliation={"decisions": []},
+        )
+        instructions = "\n".join(request["instructions"])
+
+        self.assertIn("subject_identifier", instructions)
+        self.assertIn("schema.*.code", instructions)
+        self.assertIn("subject_identifier", request["response_contract"]["context_bindings"][0]["context_key"])
+        self.assertIn("value_domain_key", request["response_contract"]["context_bindings"][0])
+
     def test_normalize_active_resolution_generation_contract_combines_binding_types(self) -> None:
         payload = {
             "field_bindings": [

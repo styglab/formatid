@@ -203,6 +203,151 @@ class CapabilityGenerationTest(unittest.TestCase):
         self.assertEqual(normalized["suggestions"][0]["outputs"][0]["concept_key"], "concept.finance.revenue")
         self.assertEqual(normalized["suggestions"][0]["outputs"][0]["representation_schema_key"], "schema.finance.revenue.money_amount")
 
+    def test_manual_capability_inputs_inherit_representation_from_binding_spec(self) -> None:
+        contexts = [
+            {
+                "operation": {"source_operation_id": "op_1", "operation_key": "getRevenue", "name": "getRevenue"},
+                "input_bindings": [
+                    {
+                        "source_parameter_id": "param_crno",
+                        "field_path": "request.query.crno",
+                        "concept_key": "concept.identifier.kr_corporate_registration_number",
+                        "required_concept_key": "concept.identifier.kr_corporate_registration_number",
+                        "representation_key": "repr.identifier.kr_corporate_registration_number.identifier_value",
+                        "representation_schema_key": "schema.identifier.kr_corporate_registration_number.string",
+                        "canonical_ref": {"class_name": "Identifier", "slot_name": "identifier_value"},
+                        "direction": "input",
+                    }
+                ],
+                "output_bindings": [
+                    {
+                        "source_field_id": "field_sales",
+                        "field_path": "response.body.items.item.enpSaleAmt",
+                        "concept_key": "concept.finance.revenue",
+                        "representation_key": "repr.finance.revenue.observed_amount",
+                        "representation_schema_key": "schema.finance.revenue.decimal",
+                        "canonical_ref": {"class_name": "Observation", "slot_name": "observed_amount"},
+                        "direction": "output",
+                    }
+                ],
+                "skipped_bindings": [],
+                "context_bindings": [],
+            }
+        ]
+        payload = normalize_manual_capability_generation_response(
+            {
+                "suggestions": [
+                    {
+                        "decision": "propose_capability",
+                        "source_operation_id": "op_1",
+                        "capability": {
+                            "capability_key": "company.finance.get_revenue",
+                            "namespace": "company.finance",
+                            "name": "Get Revenue",
+                            "description": "Lookup company revenue.",
+                            "intent_spec": {"canonical_outputs": ["concept.finance.revenue"]},
+                        },
+                        "inputs": [
+                            {
+                                "input_key": "corporate_registration_number",
+                                "concept_key": "concept.identifier.kr_corporate_registration_number",
+                                "canonical_ref": {"class_name": "Identifier", "slot_name": "identifier_value"},
+                                "required": True,
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "output_key": "revenue_amount",
+                                "concept_key": "concept.finance.revenue",
+                                "representation_key": "repr.finance.revenue.observed_amount",
+                                "representation_schema_key": "schema.finance.revenue.decimal",
+                                "canonical_ref": {"class_name": "Observation", "slot_name": "observed_amount"},
+                            }
+                        ],
+                        "operation_link": {"source_operation_id": "op_1", "binding_spec": {}},
+                        "confidence": 0.95,
+                        "rationale": "Revenue lookup.",
+                    }
+                ]
+            }
+        )
+
+        suggestions = capability_suggestions_from_manual_response(contexts, payload, allow_heuristic_propose=False)
+
+        self.assertEqual(suggestions[0]["inputs"][0]["representation_key"], "repr.identifier.kr_corporate_registration_number.identifier_value")
+        self.assertEqual(suggestions[0]["inputs"][0]["representation_schema_key"], "schema.identifier.kr_corporate_registration_number.string")
+
+    def test_manual_capability_ios_inherit_empty_canonical_ref_from_binding_ref(self) -> None:
+        contexts = [
+            {
+                "operation": {"source_operation_id": "op_1", "operation_key": "status", "name": "status"},
+                "input_bindings": [
+                    {
+                        "source_parameter_id": "param_bno",
+                        "field_path": "request.body.b_no",
+                        "concept_key": "concept.identifier.kr_business_registration_number",
+                        "required_concept_key": "concept.identifier.kr_business_registration_number",
+                        "representation_key": "repr.identifier.kr_business_registration_number.identifier_value",
+                        "representation_schema_key": "schema.identifier.kr_business_registration_number.string",
+                        "canonical_ref": {"class_name": "BusinessRegistrationNumber", "slot_name": "identifier_value"},
+                        "direction": "input",
+                    }
+                ],
+                "output_bindings": [
+                    {
+                        "source_field_id": "field_status",
+                        "field_path": "response.body.data[].b_stt_cd",
+                        "concept_key": "concept.tax.business_registration_status",
+                        "representation_key": "repr.tax.business_registration_status.observed_value",
+                        "representation_schema_key": "schema.tax.business_registration_status.code",
+                        "canonical_ref": {"class_name": "Observation", "slot_name": "observed_value"},
+                        "direction": "output",
+                    }
+                ],
+                "skipped_bindings": [],
+                "context_bindings": [],
+            }
+        ]
+        payload = normalize_manual_capability_generation_response(
+            {
+                "suggestions": [
+                    {
+                        "decision": "propose_capability",
+                        "source_operation_id": "op_1",
+                        "capability": {
+                            "capability_key": "company.tax.check_business_registration_status",
+                            "namespace": "company.tax",
+                            "name": "Check business registration status",
+                            "description": "Check status.",
+                            "intent_spec": {"canonical_outputs": ["concept.tax.business_registration_status"]},
+                        },
+                        "inputs": [
+                            {
+                                "input_key": "business_registration_number",
+                                "concept_key": "concept.identifier.kr_business_registration_number",
+                                "canonical_ref": {"class_name": "", "slot_name": ""},
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "output_key": "business_registration_status",
+                                "concept_key": "concept.tax.business_registration_status",
+                                "canonical_ref": {"class_name": "", "slot_name": ""},
+                            }
+                        ],
+                        "operation_link": {"source_operation_id": "op_1", "binding_spec": {}},
+                        "confidence": 0.95,
+                        "rationale": "Status lookup.",
+                    }
+                ]
+            }
+        )
+
+        suggestions = capability_suggestions_from_manual_response(contexts, payload, allow_heuristic_propose=False)
+
+        self.assertEqual(suggestions[0]["inputs"][0]["canonical_ref"], {"class_name": "BusinessRegistrationNumber", "slot_name": "identifier_value"})
+        self.assertEqual(suggestions[0]["outputs"][0]["canonical_ref"], {"class_name": "Observation", "slot_name": "observed_value"})
+
     def test_strict_llm_missing_capability_does_not_propose_fallback(self) -> None:
         contexts = [
             {
@@ -259,6 +404,23 @@ class CapabilityGenerationTest(unittest.TestCase):
         self.assertEqual(request["type"], "capability_generation")
         self.assertEqual(request["legacy_type"], "capability_contracting")
         self.assertIn("canonical_model_linkml_fragment", request)
+
+    def test_manual_request_instructs_contexts_and_canonical_ref_preservation(self) -> None:
+        request = build_manual_capability_generation_request(
+            run_id="run_1",
+            source={"id": "src_1"},
+            document={"id": "doc_1"},
+            operations=[],
+            canonical_reconciliation={"linkml_fragment": {"classes": {}, "slots": {}}},
+            binding_generation={"suggestions": []},
+        )
+        instructions = "\n".join(request["instructions"])
+        contract = request["response_contract"]["suggestions"][0]
+
+        self.assertIn("subject_identifier", instructions)
+        self.assertIn("canonical_ref", instructions)
+        self.assertIn("contexts", contract["operation_link"]["binding_spec"])
+        self.assertIn("value_domain_key", contract["outputs"][0])
 
 
 if __name__ == "__main__":

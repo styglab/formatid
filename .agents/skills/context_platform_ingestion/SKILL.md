@@ -59,6 +59,9 @@ codex exec -C /workspace --sandbox danger-full-access -a never '<원샷 ingestio
 - Codex나 operator agent가 판단한 내용은 `--agent-mode manual`과 `--agent-response`로 CLI/API 경계를 통과해야 한다.
 - Context Platform ingestion runtime은 외부 LLM을 직접 호출하지 않는다. `--llm-mode codex_manual`은 legacy alias로만 허용된다.
 - 생성 결과는 proposal/review lifecycle을 따른다. 사용자가 명시하지 않으면 catalog에 바로 적용하거나 승인하지 않는다.
+- 모든 ingestion 결과는 proposal로 남긴다. `blocked`나 `review_required`도 폐기하지
+  말고 review 가능한 quality gate 결과로 남긴다. Registry publish 대상은
+  `approval_ready`이고 reviewer가 승인한 proposal item뿐이다.
 - Context Platform 용어와 경로를 사용한다. `semantic_platform` 이름을 새로 만들지 않는다.
 - ingestion 실행과 문서 파싱은 `scripts/ops.py context-platform ingest-source`가
   worker 컨테이너에서 수행하는 active runtime workflow를 따른다.
@@ -93,6 +96,13 @@ codex exec -C /workspace --sandbox danger-full-access -a never '<원샷 ingestio
   env 변수명만 `verification.secret_env`에 넣는다. 필수 샘플값은 문서 또는 공식/공개
   웹 evidence에서 찾을 수 있으며, 비밀이 아닌 값만 `verification.sample_parameters`
   에 넣고 evidence URL/ref를 남긴다.
+- verification 실패는 timeout, rate-limit, auth failure, upstream 5xx, response
+  shape mismatch처럼 분류한다. timeout 같은 transient failure는 모델 실패가 아니라
+  retry/review 대상으로 평가한다.
+- ingestion 결과에는 observed evidence, normalization preview, quality gate를
+  확인한다. Preview를 만들 수 없는 binding은 바로 publish-ready로 보지 않는다.
+- Capability gate는 API/DB query처럼 실행 가능한 source에만 필수다. 문서/CSV/분류체계
+  source는 semantic ingestion과 preview 가능성을 우선 평가한다.
 
 ## 신규 문서 판정
 
@@ -233,6 +243,25 @@ planner/API 소비자용 `output_key`를 반드시 포함해야 한다. Concept 
 `provides_concepts` 또는 `intent_spec.canonical_outputs`에 선언한 concept는
 반드시 `outputs[]`에도 같은 `concept_key`로 존재해야 한다.
 
+MeaningScope는 source 문서의 전체 도메인이 아니라 Concept namespace를 따른다.
+예를 들어 금융 API에서 발견된 값이라도 `concept.identifier.*`는
+`meaning_scope=identifier`, `concept.time.*`는 `meaning_scope=time`,
+`concept.currency.*`는 `meaning_scope=currency`로 둔다.
+`concept.finance.*`, `concept.tax.*`, `concept.company.*`, `concept.person.*`
+도 각각 같은 namespace scope를 사용한다. 문서/공급자 도메인을 이유로
+identifier/time/currency concept를 finance나 tax scope에 넣지 않는다.
+
+`schema.*.code` 같은 code-valued RepresentationSchema는 value domain이 필요하다.
+문서에 코드표, 코드 라벨, enum 값, valid/status/tax type 같은 코드 의미가 있으면
+`representation_schema.value_domain_key`를 넣고
+`meaning_resolution.value_domain_decisions[]`에 code/value 목록을 만든다. 코드표
+근거가 부족하면 `review_required`가 되도록 rationale/evidence에 부족한 점을 남긴다.
+
+반복 응답(`data[]`, `items[]`, `item`)에서 output row가 입력 identifier나 응답 내
+identifier에 종속되면 `context_bindings`에 `context_key: subject_identifier`를
+추가한다. 사업자번호/법인등록번호 같은 identifier field는 row의 primary output이
+아니라 다른 output의 subject context가 될 수 있다.
+
 Source Structure 단계는 semantic 판단 단계가 아니다. 여기서는 실제 source
 contract만 추출한다.
 
@@ -256,7 +285,8 @@ Resolution 단계에서는 binding을 반드시 세 종류로 분리한다.
 - `context_bindings`: source response context field가 이미 선택된
   CanonicalRepresentation의 context를 채우는 연결. 예: `curCd ->
   context_key: currency`, `bizYear -> context_key: fiscal_year`, `fnclDcd ->
-  context_key: statement_type`. context field를 `field_bindings`에 넣지 않는다.
+  context_key: statement_type`, 반복 row의 `b_no`/`crno ->
+  context_key: subject_identifier`. context field를 `field_bindings`에 넣지 않는다.
 - `parameter_bindings`: capability input concept가 source request parameter로
   들어가는 연결. 예: `concept.identifier.kr_corporate_registration_number ->
   request.query.crno`.
@@ -264,6 +294,10 @@ Resolution 단계에서는 binding을 반드시 세 종류로 분리한다.
 Capability 단계에서는 field binding만 `outputs[]`로 노출한다. Context binding은
 `operation_link.binding_spec.contexts[]`에 남기며, `revenue_amount` 같은
 `output_key`는 consumer/planner-facing 이름일 뿐 canonical property가 아니다.
+Capability input/output의 `canonical_ref`는 upstream binding의 `canonical_ref`를
+보존한다. `binding_ref.canonical_ref`가 있는데 top-level `canonical_ref`를 빈 값으로
+두지 않는다. 반복 row를 반환하는 capability는 `binding_spec.contexts[]`에
+`subject_identifier` 같은 subject context를 포함해야 한다.
 
 RepresentationSchema는 datatype/regex/enum/value domain/cardinality/examples를
 담는다. 예: 사업자등록번호는 `pattern: "^\\d{10}$"`, 법인등록번호는
@@ -462,6 +496,8 @@ API response 구조 차이는 코드 분기가 아니라 `field_candidates.field
 - source operation count
 - proposal bundle id
 - verification summary
+- quality status (`approval_ready`, `review_required`, `blocked`)
+- normalization preview count
 - failed 또는 needs_input endpoint check
 
 최종 응답은 짧게 작성하되 다음 정보를 포함한다.
@@ -472,6 +508,7 @@ processed:
   - run_id
   - proposal_bundle_id
   - verification_summary
+  - quality_status
 
 skipped:
   - source_path

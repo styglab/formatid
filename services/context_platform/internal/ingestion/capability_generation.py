@@ -100,7 +100,11 @@ def build_manual_capability_generation_request(
             "Use source_operations as the operation reference. Do not invent an operation registry.",
             "Include capability inputs, outputs, and a capability-step link with binding_spec.",
             "Capability inputs and outputs must reference concept_key, representation_key, and representation_schema_key when the upstream resolution provides them.",
+            "Capability inputs and outputs should preserve canonical_ref from the upstream binding_ref; do not return empty canonical_ref when binding_ref has one.",
             "Use output_key as a consumer/planner-facing name only. Do not treat output_key as a canonical property.",
+            "Only field bindings become outputs. Context bindings such as subject_identifier, currency, fiscal_year, statement_type, source, and observed_date must stay in operation_link.binding_spec.contexts.",
+            "If a capability returns repeated rows or array items for an identifier input, operation_link.binding_spec.contexts must include subject_identifier or another subject context that ties each output row to its subject.",
+            "If an output uses a code-valued RepresentationSchema such as schema.*.code, preserve its value_domain_key or enum mapping from resolution/meaning evidence.",
             "If the operation has no meaningful output bindings, use skip_capability.",
             "Do not create generic capabilities such as record.lookup. If the output class is only a transport/container class, use skip_capability.",
             "Return exactly one suggestion for every operation_context. Missing suggestions are treated as skip_capability, not automatic capability proposals.",
@@ -154,13 +158,19 @@ def build_manual_capability_generation_request(
                             "canonical_ref": {"class_name": "string", "slot_name": "string"},
                             "source_field_id": "string|null",
                             "binding_ref": {},
+                            "value_domain_key": "value_domain.namespace.code_set|null",
                             "depends_on_binding": "boolean",
                         }
                     ],
                     "operation_link": {
                         "source_operation_id": "string",
                         "priority": "integer",
-                        "binding_spec": {},
+                        "binding_spec": {
+                            "inputs": [],
+                            "outputs": [],
+                            "contexts": ["context bindings including subject_identifier for repeated subject-scoped rows"],
+                            "skipped_controls": []
+                        },
                     },
                     "confidence": "float",
                     "rationale": "string",
@@ -355,13 +365,24 @@ def _suggestion_from_manual(
         fallback.get("operation_link") if isinstance(fallback.get("operation_link"), dict) else {},
         manual.get("operation_link") if isinstance(manual.get("operation_link"), dict) else {},
     )
+    binding_spec = operation_link.get("binding_spec") if isinstance(operation_link.get("binding_spec"), dict) else {}
+    inputs = _complete_capability_ios(
+        manual.get("inputs") if isinstance(manual.get("inputs"), list) else fallback.get("inputs") or [],
+        fallback.get("inputs") if isinstance(fallback.get("inputs"), list) else [],
+        binding_spec.get("inputs") if isinstance(binding_spec.get("inputs"), list) else [],
+    )
+    outputs = _complete_capability_ios(
+        manual.get("outputs") if isinstance(manual.get("outputs"), list) else fallback.get("outputs") or [],
+        fallback.get("outputs") if isinstance(fallback.get("outputs"), list) else [],
+        binding_spec.get("outputs") if isinstance(binding_spec.get("outputs"), list) else [],
+    )
     return {
         **fallback,
         "decision": decision,
         "source_operation_id": str(manual.get("source_operation_id") or fallback.get("source_operation_id") or ""),
         "capability": capability,
-        "inputs": manual.get("inputs") if isinstance(manual.get("inputs"), list) else fallback.get("inputs") or [],
-        "outputs": manual.get("outputs") if isinstance(manual.get("outputs"), list) else fallback.get("outputs") or [],
+        "inputs": inputs,
+        "outputs": outputs,
         "operation_link": operation_link,
         "confidence": round(float(manual.get("confidence", fallback.get("confidence") or 0.0)), 3),
         "rationale": str(manual.get("rationale") or fallback.get("rationale") or ""),
@@ -369,6 +390,63 @@ def _suggestion_from_manual(
         "llm_decision": True,
         "requires_review": True,
     }
+
+
+def _complete_capability_ios(items: list[Any], fallback_items: list[Any], binding_refs: list[Any]) -> list[dict[str, Any]]:
+    fallback_index = _io_completion_index(fallback_items)
+    binding_index = _io_completion_index(binding_refs)
+    completed: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        merged = dict(item)
+        key = _io_completion_key(merged)
+        for source in (binding_index.get(key), fallback_index.get(key)):
+            if not isinstance(source, dict):
+                continue
+            for field in (
+                "concept_key",
+                "required_concept_key",
+                "representation_id",
+                "representation_key",
+                "representation_schema_key",
+                "canonical_class_slot_id",
+                "source_parameter_id",
+                "source_field_id",
+                "binding_ref",
+            ):
+                if not merged.get(field) and source.get(field):
+                    merged[field] = source.get(field)
+            if _canonical_ref_empty(merged.get("canonical_ref")) and not _canonical_ref_empty(source.get("canonical_ref")):
+                merged["canonical_ref"] = source.get("canonical_ref")
+            if not merged.get("binding_ref") and isinstance(source, dict):
+                merged["binding_ref"] = _binding_ref(source)
+        binding_ref = merged.get("binding_ref") if isinstance(merged.get("binding_ref"), dict) else {}
+        if _canonical_ref_empty(merged.get("canonical_ref")) and not _canonical_ref_empty(binding_ref.get("canonical_ref")):
+            merged["canonical_ref"] = binding_ref.get("canonical_ref")
+        completed.append(merged)
+    return completed
+
+
+def _canonical_ref_empty(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return True
+    return not str(value.get("class_name") or value.get("entity_name") or "").strip() and not str(value.get("slot_name") or "").strip()
+
+
+def _io_completion_index(items: list[Any]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = _io_completion_key(item)
+        if key and key not in index:
+            index[key] = item
+    return index
+
+
+def _io_completion_key(item: dict[str, Any]) -> str:
+    return str(item.get("concept_key") or item.get("required_concept_key") or item.get("input_key") or item.get("output_key") or "")
 
 
 def _merge_operation_link(fallback: dict[str, Any], manual: dict[str, Any]) -> dict[str, Any]:

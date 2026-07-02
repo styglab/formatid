@@ -20,6 +20,8 @@ upload source document
      -> propose field/context/parameter bindings
      -> propose capabilities
      -> verify operation/capability evidence
+     -> collect observed evidence and build normalization previews
+     -> evaluate quality gates
      -> create proposal bundle
   -> human review
   -> approve
@@ -108,6 +110,7 @@ Prefect run-context-platform-ingestion
      -> resolution_generation
      -> capability_generation
      -> operation_verification
+     -> quality_gate_evaluation
      -> create_proposal_bundle
 ```
 
@@ -380,13 +383,52 @@ evidence를 만든다.
 - mutation endpoint는 실행하지 않고 evidence에 `skipped`로 남긴다.
 - base URL이나 required sample input이 없으면 `skipped` 또는 `needs_input`으로
   남긴다.
+- timeout, rate-limit, auth failure, upstream 5xx, response shape mismatch는
+  error category로 분리한다. transient timeout은 review/retry 대상이지 source
+  meaning 자체의 실패로 보지 않는다.
 
-### 9. Proposal Bundle
+### 9. Observed Evidence / Normalization Preview / Quality Gate
+
+operation verification 뒤에는 observed evidence를 정리하고, capability
+`binding_spec`으로 normalization preview를 만든다.
+
+역할 분리:
+
+- document evidence: label, definition, code table, required/batch/auth 같은 의미와
+  계약 후보의 근거
+- observed evidence: 실제 endpoint response, CSV sample row, DB sample query,
+  문서 chunk sample 같은 shape와 실행 가능성의 근거
+- agent assertion: Concept, Representation, Schema, Binding, Capability에 대한
+  의미 resolution 판단
+- normalization preview: source sample을 canonical object preview로 변환한 실행
+  증거
+- review decision: 사람이 publish 가능 여부를 결정한 governance evidence
+
+Quality gate 결과:
+
+- `approval_ready`: source shape, evidence, meaning, binding, preview, capability,
+  verification gate를 통과
+- `review_required`: 의미 판단은 가능하지만 transient verification, missing sample,
+  non-executable source, 일부 preview 부족 등 사람이 확인해야 함
+- `blocked`: source shape, meaning references, binding invariants, capability
+  contract, preview transform이 깨져 publish 불가
+- `rejected`: reviewer가 명시적으로 폐기
+
+모든 ingestion 결과는 proposal로 남긴다. 단, Registry publish는
+`approval_ready`이고 review에서 승인된 proposal item에만 허용한다. Capability
+gate는 API/DB query처럼 실행 가능한 source에만 필수다.
+
+### 10. Proposal Bundle
 
 한 source document/run에서 나온 proposal을 review 가능한 bundle로 묶는다.
 
 bundle은 UI 검토 컨테이너이고, 승인 단위는 proposal item이다. publish는 승인된
 item만 반영한다.
+
+bundle summary에는 `quality_status`, `quality_gate_counts`, `publishable`,
+`normalization_preview_count`, `verification_summary`를 포함한다. 별도
+`ingestion_quality_gate` proposal은 observed evidence summary, normalization
+preview, gate별 issue를 reviewable payload로 보존한다.
 
 ## Agent Mode
 

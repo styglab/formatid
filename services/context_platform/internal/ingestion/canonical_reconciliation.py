@@ -157,6 +157,10 @@ def build_manual_canonical_reconciliation_request(
             "When canonical_context.classes contains view_fields, use them as convenience matching names and planner-facing language, not as direct canonical slots to create.",
             "Reuse or extend existing Concepts, CanonicalRepresentations, or schema constraints when they preserve the source meaning without distortion.",
             "Create new representation objects only when the current approved model cannot represent the business meaning.",
+            "Concept meaning_scope must follow the Concept namespace unless there is explicit cross-scope governance evidence: concept.identifier.* -> identifier, concept.time.* -> time, concept.currency.* -> currency, concept.finance.* -> finance, concept.tax.* -> tax, concept.company.* -> company, concept.person.* -> person.",
+            "Do not assign a Concept to the source document's broad domain just because the API belongs to that domain. For example, a finance API can still contain identifier, time, and currency Concepts.",
+            "When a RepresentationSchema uses a code-valued format such as schema.*.code, include a matching value_domain_key in the schema and create/reuse a value_domain_decision with observed code values and labels.",
+            "Use value_domain_decisions for governed status, validation, category, tax type, and other enumerated code sets. Do not leave code values as ungoverned strings when the document provides a code table or code labels.",
             "Use decision `skip` for provider transport fields, response envelopes, pagination, service keys, result codes, and other non-business controls.",
             "Decide skip/reuse/create/extend/revise/conflict from the provided evidence and canonical context; do not rely on hard-coded provider or domain keyword rules.",
             "If a term is skipped, leave proposed_canonical/proposed_representation class_name and slot_name empty so downstream proposal stages do not reintroduce fallback canonical objects.",
@@ -187,6 +191,8 @@ def build_manual_canonical_reconciliation_request(
             "class_kind": "business_entity classes are primary domain objects; reference_value/reference_scheme classes hold governed codes and schemes; value_object/context_object classes structure values and contexts such as money and time intervals.",
             "view_fields": "Convenience fields that make normalized patterns easier to read. They are matching hints, not direct storage slots.",
             "fact_pattern": "When rows/columns represent measured facts, model the measured value separately from the subject, concept/classification, document/evidence, and TimeInterval context.",
+            "meaning_scope_policy": "The normal scope is the second segment of concept.<scope>.<meaning>. Source/provider domain does not override identifier/time/currency/tax/company/person scopes.",
+            "value_domain_policy": "Any code-valued RepresentationSchema should name a value_domain_key and have a value_domain_decision unless it is clearly an unconstrained free-form code.",
         },
         "anti_patterns": [
             {
@@ -293,7 +299,7 @@ def build_manual_canonical_reconciliation_request(
                     "concept": {
                         "stable_key": "concept.namespace.meaning",
                         "kind": "object_concept|metric_concept|identifier_concept|status_concept|value_concept|unit_concept|time_concept|account_concept|document_concept|operation_concept",
-                        "meaning_scope": "finance|tax|identifier|time|company|global",
+                        "meaning_scope": "same as concept namespace: finance|tax|identifier|time|currency|company|person|organization|global",
                         "label_ko": "string",
                         "label_en": "string",
                         "definition": "meaning only; no datatype, regex, enum, or provider transport constraint",
@@ -350,7 +356,7 @@ def build_manual_canonical_reconciliation_request(
                         "stable_key": "schema.namespace.meaning.format",
                         "datatype": "string|integer|decimal|boolean|date|enum|object",
                         "pattern": "regex string when applicable",
-                        "value_domain_key": "value_domain.namespace.code_set|null",
+                        "value_domain_key": "required for code-valued schemas such as schema.*.code; null only for non-code/free-form schemas",
                         "unit_concept_key": "concept.currency.krw|null",
                         "cardinality": "one|many",
                         "required": "boolean",

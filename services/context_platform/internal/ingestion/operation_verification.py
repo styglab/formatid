@@ -129,22 +129,45 @@ def _verify_operation(
                 headers=request_parts["headers"],
                 json=request_parts["body"] if request_parts["body"] not in ({}, None) else None,
             )
-    except httpx.HTTPError as exc:
+    except httpx.TimeoutException as exc:
         return {
             **base_record,
             "status": "failed",
+            "binding_validation": {
+                **base_record["binding_validation"],
+                "error_category": "transient_timeout",
+                "transient": True,
+            },
+            "error_message": str(exc),
+        }
+    except httpx.HTTPError as exc:
+        category = "network_error"
+        return {
+            **base_record,
+            "status": "failed",
+            "binding_validation": {
+                **base_record["binding_validation"],
+                "error_category": category,
+                "transient": True,
+            },
             "error_message": str(exc),
         }
 
     response_ref = _response_sample_ref(response)
     coverage = _response_field_coverage(operation.get("fields", []), response)
     status = "verified" if 200 <= response.status_code < 300 and not coverage.get("missing_required_output_paths") else "failed"
+    error_category = "" if status == "verified" else _response_error_category(response.status_code, coverage)
     return {
         **base_record,
         "status": status,
         "http_status": response.status_code,
         "response_sample_ref": response_ref,
         "field_coverage": coverage,
+        "binding_validation": {
+            **base_record["binding_validation"],
+            "error_category": error_category,
+            "transient": error_category in {"rate_limited", "upstream_5xx"},
+        },
         "error_message": "" if status == "verified" else "Endpoint response did not satisfy expected status or required output field coverage.",
     }
 
@@ -189,6 +212,16 @@ def _verify_capability(
         "input_bindings_ready": bool(input_bindings),
         "output_bindings_ready": bool(output_bindings),
         "operation_check_id": operation_check.get("id"),
+        "error_category": (
+            operation_check.get("binding_validation", {}).get("error_category")
+            if isinstance(operation_check.get("binding_validation"), dict)
+            else ""
+        ),
+        "transient": (
+            bool(operation_check.get("binding_validation", {}).get("transient"))
+            if isinstance(operation_check.get("binding_validation"), dict)
+            else False
+        ),
     }
     if not source_operation_id:
         status = "failed"
@@ -227,6 +260,20 @@ def _verify_capability(
 
 def _persist_operation_check(repo: ContextPlatformRepository, payload: dict[str, Any]) -> dict[str, Any]:
     return repo.create_endpoint_check(payload)
+
+
+def _response_error_category(status_code: int, coverage: dict[str, Any]) -> str:
+    if status_code in {401, 403}:
+        return "auth_failed"
+    if status_code == 429:
+        return "rate_limited"
+    if 500 <= status_code < 600:
+        return "upstream_5xx"
+    if coverage.get("missing_required_output_paths"):
+        return "response_shape_mismatch"
+    if status_code < 200 or status_code >= 300:
+        return "http_status_failed"
+    return ""
 
 
 def _operation_base_url(source: dict[str, Any], operation: dict[str, Any]) -> str:
@@ -435,11 +482,12 @@ def _secret_env_names(parameter_name: str, source_config: dict[str, Any]) -> lis
 
 def _response_sample_ref(response: httpx.Response) -> dict[str, Any]:
     content_type = response.headers.get("content-type", "")
-    body = response.text[:2048] if response.text else ""
+    max_body_chars = int(os.getenv("CONTEXT_PLATFORM_RESPONSE_PREVIEW_MAX_CHARS") or "65536")
+    body = response.text[:max_body_chars] if response.text else ""
     return {
         "content_type": content_type,
         "body_preview": body,
-        "body_truncated": len(response.text or "") > 2048,
+        "body_truncated": len(response.text or "") > max_body_chars,
     }
 
 

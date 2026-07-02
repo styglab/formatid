@@ -14,6 +14,7 @@ from services.context_platform.internal.ingestion.langgraph.document_structure i
 from services.context_platform.internal.ingestion.langgraph.document_structure import extract_document_structure_with_graph
 from services.context_platform.internal.ingestion.llm.document_structure import normalize_manual_document_structure_response
 from services.context_platform.internal.ingestion.parsers.common import LoadedSource
+from services.context_platform.internal.ingestion.quality_gate import evaluate_ingestion_quality
 from services.context_platform.internal.storage import ContextPlatformRepository
 from services.context_platform.internal.storage.object_store import ObjectStore
 
@@ -725,8 +726,36 @@ def create_ingestion_proposals(
     binding_generation: dict[str, Any],
     capability_generation: dict[str, Any],
     verification_result: dict[str, Any],
+    quality_result: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    quality_payload = quality_result or evaluate_ingestion_quality(
+        operations=operations,
+        document_fields=document_fields,
+        canonical_reconciliation=canonical_reconciliation,
+        binding_generation=binding_generation,
+        capability_generation=capability_generation,
+        verification_result=verification_result,
+    )
     proposals = []
+    proposals.append(
+        repo.create_proposal(
+            {
+                "source_type": "source_document_ingestion",
+                "title": f"Evaluate ingestion quality for {document.get('name') or 'source document'}",
+                "entity_type": "ingestion_quality_gate",
+                "entity_id": document["id"],
+                "change_type": "evaluate",
+                "status": "proposed",
+                "payload": quality_payload,
+                "rationale": "Classify the ingestion output as approval_ready, review_required, or blocked using source shape, evidence, meaning, binding, preview, capability, and verification gates.",
+                "evidence": [
+                    {"source_document_id": document["id"], "kind": "quality_gate"},
+                    {"source_document_id": document["id"], "kind": "normalization_preview"},
+                    {"source_document_id": document["id"], "kind": "observed_evidence"},
+                ],
+            }
+        )
+    )
     proposals.append(
         repo.create_proposal(
             {
@@ -1090,7 +1119,9 @@ def create_evidence_snapshot(
     binding_generation: dict[str, Any],
     capability_generation: dict[str, Any],
     verification_result: dict[str, Any],
+    quality_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    quality_payload = quality_result or {}
     return repo.create_evidence_snapshot(
         {
             "run_id": run["id"],
@@ -1148,6 +1179,14 @@ def create_evidence_snapshot(
                     "engine": capability_generation.get("engine"),
                 },
                 "operation_verification": verification_result.get("summary") or {},
+                "observed_evidence": quality_payload.get("observed_evidence") if isinstance(quality_payload, dict) else {},
+                "quality_gate": {
+                    "quality_status": quality_payload.get("quality_status"),
+                    "gate_counts": quality_payload.get("gate_counts") or {},
+                    "publishable": quality_payload.get("publishable"),
+                }
+                if isinstance(quality_payload, dict)
+                else {},
             },
         }
     )
@@ -1166,8 +1205,10 @@ def create_final_proposal_bundle(
     binding_generation: dict[str, Any],
     capability_generation: dict[str, Any],
     verification_result: dict[str, Any],
+    quality_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     executable = bool(operations)
+    quality_payload = quality_result or {}
     return repo.create_proposal_bundle(
         {
             "run_id": run["id"],
@@ -1196,6 +1237,12 @@ def create_final_proposal_bundle(
                 "capability_decision_counts": capability_generation.get("decision_counts") or {},
                 "capability_operation_count": capability_generation.get("operation_count") or 0,
                 "verification_summary": verification_result.get("summary") or {},
+                "quality_status": quality_payload.get("quality_status"),
+                "quality_gate_counts": quality_payload.get("gate_counts") or {},
+                "publishable": quality_payload.get("publishable"),
+                "normalization_preview_count": len(quality_payload.get("normalization_previews") or [])
+                if isinstance(quality_payload.get("normalization_previews"), list)
+                else 0,
                 "executable": executable,
                 "execution_note": "Executable operation links can be reviewed." if executable else "No executable source operation was extracted.",
             },

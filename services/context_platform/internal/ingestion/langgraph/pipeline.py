@@ -9,6 +9,7 @@ from services.context_platform.internal.ingestion.llm.agent_response import Agen
 from services.context_platform.internal.ingestion.llm.agent_response import validate_agent_response_artifact
 from services.context_platform.internal.ingestion.llm.agent_response import validate_manual_stage_response
 from services.context_platform.internal.ingestion.operation_verification import verify_ingestion_contracts
+from services.context_platform.internal.ingestion.quality_gate import evaluate_ingestion_quality
 from services.context_platform.internal.ingestion.source_contract import validate_source_contract
 from services.context_platform.internal.storage import ContextPlatformRepository
 
@@ -28,6 +29,7 @@ class IngestionPipelineState(TypedDict, total=False):
     resolution_generation: dict[str, Any]
     capability_generation: dict[str, Any]
     verification_result: dict[str, Any]
+    quality_result: dict[str, Any]
     proposals: list[dict[str, Any]]
     evidence_snapshot: dict[str, Any]
     proposal_bundle: dict[str, Any]
@@ -457,6 +459,14 @@ def _operation_verification(state: IngestionPipelineState) -> IngestionPipelineS
         binding_generation=state["resolution_generation"],
         capability_generation=state["capability_generation"],
     )
+    state["quality_result"] = evaluate_ingestion_quality(
+        operations=state.get("operations") or [],
+        document_fields=state.get("document_fields") or [],
+        canonical_reconciliation=state["meaning_resolution"],
+        binding_generation=state["resolution_generation"],
+        capability_generation=state["capability_generation"],
+        verification_result=state["verification_result"],
+    )
     state["stage"] = helpers["STAGE_OPERATION_VERIFICATION"]
     return state
 
@@ -474,6 +484,7 @@ def _create_proposal_bundle(state: IngestionPipelineState) -> IngestionPipelineS
         state["resolution_generation"],
         state["capability_generation"],
         state["verification_result"],
+        state["quality_result"],
     )
     evidence_snapshot = helpers["create_evidence_snapshot"](
         repo,
@@ -487,6 +498,7 @@ def _create_proposal_bundle(state: IngestionPipelineState) -> IngestionPipelineS
         state["resolution_generation"],
         state["capability_generation"],
         state["verification_result"],
+        state["quality_result"],
     )
     bundle = helpers["create_final_proposal_bundle"](
         repo,
@@ -501,6 +513,7 @@ def _create_proposal_bundle(state: IngestionPipelineState) -> IngestionPipelineS
         state["resolution_generation"],
         state["capability_generation"],
         state["verification_result"],
+        state["quality_result"],
     )
     metadata = {
         **(state["run"].get("metadata") if isinstance(state["run"].get("metadata"), dict) else {}),
@@ -516,6 +529,9 @@ def _create_proposal_bundle(state: IngestionPipelineState) -> IngestionPipelineS
         "capability_contracting_decision_counts": state["capability_generation"].get("decision_counts") or {},
         "capability_decision_counts": state["capability_generation"].get("decision_counts") or {},
         "verification_summary": state["verification_result"].get("summary") or {},
+        "quality_status": state["quality_result"].get("quality_status"),
+        "quality_gate_counts": state["quality_result"].get("gate_counts") or {},
+        "publishable": state["quality_result"].get("publishable"),
     }
     for key in (
         "manual_meaning_resolution_request",
@@ -548,6 +564,8 @@ def _create_proposal_bundle(state: IngestionPipelineState) -> IngestionPipelineS
             "proposal_count": len(proposals),
             "proposal_bundle_id": bundle["id"],
             "verification_summary": state["verification_result"].get("summary") or {},
+            "quality_status": state["quality_result"].get("quality_status"),
+            "publishable": state["quality_result"].get("publishable"),
         },
         status="completed",
         stage=helpers["STAGE_PROPOSAL_BUNDLE"],
