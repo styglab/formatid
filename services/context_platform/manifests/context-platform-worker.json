@@ -1,0 +1,19 @@
+{
+  "service_name": "context-platform-worker",
+  "service_type": "worker",
+  "dockerfile": "services/context_platform/adapters/worker/infra/image/Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "deploy/compose/env/prefect.env",
+    "services/context_platform/adapters/worker/infra/env/app.env",
+    "services/context_platform/adapters/admin_api/infra/env/object_store.env"
+  ],
+  "depends_on_service_healthy": [
+    "postgres",
+    "minio",
+    "prefect-server"
+  ]
+}

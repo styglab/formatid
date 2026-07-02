@@ -1,0 +1,17 @@
+{
+  "service_name": "context-platform-dashboard",
+  "service_type": "api",
+  "dockerfile": "services/context_platform/adapters/dashboard/infra/image/Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "depends_on_service_healthy": [
+    "context-platform-api"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "node", "-e", "fetch('http://localhost:3000/context-platform').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

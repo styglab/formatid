@@ -2,22 +2,108 @@
 # Source of truth: services/*/manifests + apps/**/manifests
 name: infra
 services:
-  embedding-service:
+  context-platform-api:
     build:
       context: ../..
-      dockerfile: services/embedding/infra/image/Dockerfile
+      dockerfile: services/context_platform/adapters/admin_api/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     restart: unless-stopped
     env_file:
-      - ../../services/embedding/infra/env/app.env
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${EMBEDDING_SERVICE_HOST_PORT:-8020}:8000"
+      - ./env/postgres.env
+      - ./env/prefect.env
+      - ../../services/context_platform/adapters/admin_api/infra/env/app.env
+      - ../../services/context_platform/adapters/admin_api/infra/env/object_store.env
     profiles:
-      - "semantic_platform"
+      - "context_platform"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
       interval: 10s
-      timeout: 6s
-      retries: 20
+      timeout: 3s
+      retries: 5
+
+  context-platform-dashboard:
+    build:
+      context: ../..
+      dockerfile: services/context_platform/adapters/dashboard/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    profiles:
+      - "context_platform"
+    depends_on:
+      context-platform-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/context-platform').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  context-platform-planner-api:
+    build:
+      context: ../..
+      dockerfile: services/context_platform/adapters/planner_api/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ./env/postgres.env
+      - ../../services/context_platform/adapters/admin_api/infra/env/app.env
+    profiles:
+      - "context_platform"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  context-platform-worker:
+    build:
+      context: ../..
+      dockerfile: services/context_platform/adapters/worker/infra/image/Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    restart: unless-stopped
+    env_file:
+      - ./env/postgres.env
+      - ./env/prefect.env
+      - ../../services/context_platform/adapters/worker/infra/env/app.env
+      - ../../services/context_platform/adapters/admin_api/infra/env/object_store.env
+    profiles:
+      - "context_platform"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    env_file:
+      - ./env/minio.env
+    ports:
+      - "${HOST_BIND_IP:-127.0.0.1}:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "${HOST_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    profiles:
+      - "context_platform"
+    volumes:
+      - ${MINIO_DATA_DIR:-../../data/minio}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   nginx:
     build:
@@ -25,7 +111,7 @@ services:
       dockerfile: services/nginx/infra/image/Dockerfile
     restart: unless-stopped
     ports:
-      - "${NGINX_HOST_PORT:-8081}:80"
+      - "${NGINX_BIND_IP:-0.0.0.0}:${NGINX_HOST_PORT:-8081}:80"
     depends_on:
       platform-api:
         condition: service_healthy
@@ -98,7 +184,7 @@ services:
     env_file:
       - ./env/prefect.env
     profiles:
-      - "semantic_platform"
+      - "context_platform"
     volumes:
       - ${PREFECT_POSTGRES_DATA_DIR:-../../data/prefect/postgres}:/var/lib/postgresql/data
     healthcheck:
@@ -111,7 +197,7 @@ services:
     image: redis:7
     restart: unless-stopped
     profiles:
-      - "semantic_platform"
+      - "context_platform"
     volumes:
       - ${PREFECT_REDIS_DATA_DIR:-../../data/prefect/redis}:/data
     healthcheck:
@@ -129,7 +215,7 @@ services:
     ports:
       - "${HOST_BIND_IP:-127.0.0.1}:${PREFECT_HOST_PORT:-4200}:4200"
     profiles:
-      - "semantic_platform"
+      - "context_platform"
     depends_on:
       prefect-postgres:
         condition: service_healthy
@@ -141,21 +227,17 @@ services:
       timeout: 10s
       retries: 3
 
-  qdrant:
-    image: qdrant/qdrant:v1.13.4
+  prefect-services:
+    image: prefecthq/prefect:3-latest
+    command: ["prefect", "server", "services", "start"]
     restart: unless-stopped
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${QDRANT_HOST_PORT:-6333}:6333"
-      - "${HOST_BIND_IP:-127.0.0.1}:${QDRANT_GRPC_HOST_PORT:-6334}:6334"
+    env_file:
+      - ./env/prefect.env
     profiles:
-      - "semantic_platform"
-    volumes:
-      - ${QDRANT_DATA_DIR:-../../data/qdrant}:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c ': > /dev/tcp/127.0.0.1/6333'"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
+      - "context_platform"
+    depends_on:
+      prefect-server:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
@@ -169,84 +251,6 @@ services:
       interval: 2s
       timeout: 2s
       retries: 10
-
-  semantic-platform-api:
-    build:
-      context: ../..
-      dockerfile: services/semantic_platform/adapters/admin_api/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/postgres.env
-      - ../../services/semantic_platform/adapters/admin_api/infra/env/app.env
-      - ./env/minio.env
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_API_HOST_PORT:-8016}:8000"
-    profiles:
-      - "semantic_platform"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      embedding-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  semantic-platform-dashboard:
-    build:
-      context: ../..
-      dockerfile: services/semantic_platform/adapters/dashboard/infra/image/Dockerfile
-    restart: unless-stopped
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_DASHBOARD_HOST_PORT:-8018}:3000"
-    profiles:
-      - "semantic_platform"
-    depends_on:
-      semantic-platform-api:
-        condition: service_healthy
-
-  semantic-platform-planner-api:
-    build:
-      context: ../..
-      dockerfile: services/semantic_platform/adapters/planner_api/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ../../services/semantic_platform/adapters/admin_api/infra/env/app.env
-    ports:
-      - "${HOST_BIND_IP:-127.0.0.1}:${SEMANTIC_PLATFORM_PLANNER_API_HOST_PORT:-8017}:8000"
-    profiles:
-      - "semantic_platform"
-    depends_on:
-      embedding-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  semantic-platform-worker:
-    build:
-      context: ../..
-      dockerfile: services/semantic_platform/adapters/worker/infra/image/Dockerfile
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    restart: unless-stopped
-    env_file:
-      - ./env/prefect.env
-      - ../../services/semantic_platform/adapters/admin_api/infra/env/app.env
-    profiles:
-      - "semantic_platform"
-    depends_on:
-      prefect-server:
-        condition: service_healthy
-      embedding-service:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
 
   data-score-api:
     build:
@@ -324,7 +328,7 @@ services:
       - "pubdata-mcp"
       - "pubdata"
     depends_on:
-      semantic-platform-planner-api:
+      context-platform-planner-api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"]

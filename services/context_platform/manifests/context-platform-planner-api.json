@@ -1,0 +1,21 @@
+{
+  "service_name": "context-platform-planner-api",
+  "service_type": "api",
+  "dockerfile": "services/context_platform/adapters/planner_api/infra/image/Dockerfile",
+  "build_context": "../..",
+  "user": "${HOST_UID:-1000}:${HOST_GID:-1000}",
+  "restart": "unless-stopped",
+  "env_files": [
+    "deploy/compose/env/postgres.env",
+    "services/context_platform/adapters/admin_api/infra/env/app.env"
+  ],
+  "depends_on_service_healthy": [
+    "postgres"
+  ],
+  "healthcheck": {
+    "test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).read()"],
+    "interval": "10s",
+    "timeout": "3s",
+    "retries": 5
+  }
+}

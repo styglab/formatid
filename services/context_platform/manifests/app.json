@@ -1,0 +1,36 @@
+{
+  "app": "context_platform",
+  "implementation_path": "context_platform",
+  "profiles": [
+    "context_platform"
+  ],
+  "requires": {
+    "platform_services": [
+      "context-platform-api",
+      "context-platform-planner-api",
+      "context-platform-dashboard",
+      "context-platform-worker",
+      "minio",
+      "prefect-server",
+      "prefect-services"
+    ]
+  },
+  "nginx_routes": [
+    {
+      "path_prefix": "/context-platform-api",
+      "upstream_service": "context-platform-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/context-platform-planner",
+      "upstream_service": "context-platform-planner-api",
+      "upstream_port": 8000
+    },
+    {
+      "path_prefix": "/context-platform",
+      "upstream_service": "context-platform-dashboard",
+      "upstream_port": 3000,
+      "strip_prefix": false
+    }
+  ]
+}

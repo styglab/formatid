@@ -183,7 +183,7 @@ Rubric 기반으로 record, column, dataset의 의미적 품질을 평가한다.
 - `LLM_MODE=codex_manual`: 개발 중 수동 judge payload를 입력
 - `LLM_MODE=openai`: OpenAI API 사용
 
-추후 provider abstraction을 통해 Claude, Gemini, open source LLM을 추가할 수 있다.
+추후 provider abstraction을 통해 여러 LLM provider를 추가할 수 있다.
 
 ### 5. Score Engine
 

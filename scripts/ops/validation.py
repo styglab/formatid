@@ -8,6 +8,7 @@ from scripts.ops.common import COMPOSE_FILE, PROJECT_ROOT
 
 
 APP_SERVICE_TYPES = {"cron", "api", "consumer", "service"}
+PLATFORM_SERVICE_TYPES = {"platform", "database", "cache", "object_storage", "vector_db", "worker"}
 SERVICE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
@@ -50,9 +51,13 @@ def validate_config() -> dict:
         app_name = payload.get("app")
         if not app_name:
             errors.append(f"app manifest must define app: path={path}")
-        elif app_name != _app_name_from_manifest_path(path):
+        implementation_path = payload.get("implementation_path") or _app_name_from_manifest_path(path)
+        if not isinstance(implementation_path, str):
+            errors.append(f"app manifest implementation_path must be a string: app={app_name}")
+            implementation_path = _app_name_from_manifest_path(path)
+        elif implementation_path != _app_name_from_manifest_path(path):
             errors.append(
-                f"app manifest app must match directory path: path={path} app={app_name} directory={_app_name_from_manifest_path(path)}"
+                f"app manifest implementation_path must match directory path: path={path} implementation_path={implementation_path} directory={_app_name_from_manifest_path(path)}"
             )
         profiles = payload.get("profiles", [])
         if not isinstance(profiles, list) or not all(isinstance(value, str) for value in profiles):
@@ -93,13 +98,7 @@ def validate_config() -> dict:
     for definition in (*available_platform_service_definitions, *app_service_definitions):
         if not _matches(SERVICE_NAME_PATTERN, definition.service_name):
             errors.append(f"service_name must be kebab-case: service_name={definition.service_name}")
-        if definition.service_type not in APP_SERVICE_TYPES and definition.service_type not in {
-            "platform",
-            "database",
-            "cache",
-            "object_storage",
-            "vector_db",
-        }:
+        if definition.service_type not in APP_SERVICE_TYPES and definition.service_type not in PLATFORM_SERVICE_TYPES:
             warnings.append(
                 f"service_type is not one of known values: service_name={definition.service_name} service_type={definition.service_type}"
             )

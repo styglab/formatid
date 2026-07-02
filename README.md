@@ -1,22 +1,22 @@
 # formatid
 
-AI-ready data platform for domain ingestion, semantic layer context, and AI access
-apps. The current public-data direction is a **Semantic Layer Platform**:
-public API documents and manual authoring both produce reviewed semantic,
-capability, and execution-contract context for LLM planning.
+AI-ready data platform for domain ingestion, canonical context, and AI access
+apps. The current public-data direction is a **Context Platform**: API
+documents and manual authoring produce reviewed Source Catalog, Canonical Model,
+Binding Layer, and Capability Catalog data for server-side LLM planning.
 
 The platform separates runtime execution, reusable service capabilities, and
 app-owned domain logic. AI-facing apps such as MCP servers, RAG APIs, and domain
-assistants consume reviewed semantic catalog data and execution contracts.
+assistants consume reviewed canonical context and Planner Service results.
 
 ```text
 Natural language
-  -> semantic understanding
+  -> canonical input/output understanding
   -> capability resolution
-  -> execution planning
-  -> API orchestration
-  -> semantic normalization / integration
-  -> MCP / RAG / domain apps
+  -> validated plan
+  -> source operation execution
+  -> binding-based canonical normalization
+  -> LLM MCP / RAG / domain apps
 ```
 
 ## Architecture
@@ -25,7 +25,7 @@ Natural language
   and cross-app contracts.
 - `services/*`: platform services and backing capabilities such as Nginx,
   Postgres, Redis, platform API, platform dashboard, embedding service, and
-  `services/semantic_platform`.
+  `services/context_platform`.
 - `apps/*`: app orchestration, business rules, persistence, ontology, semantic transformers, and user-facing AI apps.
 
 See [docs/folder_structure_ko.md](docs/folder_structure_ko.md) for the current
@@ -39,8 +39,8 @@ Layer rule:
 
 ## Current Apps
 
-- `apps/pubdata_mcp`: MCP runtime for approved semantic execution contracts
-  produced by `services/semantic_platform`.
+- `apps/pubdata_mcp`: optional LLM MCP adapter surface for planner-level tools
+  backed by `services/context_platform`.
 
 ## Platform Services
 
@@ -55,46 +55,54 @@ The active platform service set is intentionally small:
 App-required services such as `prefect-*`, `minio`, and `qdrant` are enabled
 only when an app or platform control plane declares them.
 
-## Semantic Layer
+## Context Platform
 
-For public API orchestration, `services/semantic_platform` is the declarative
-semantic layer:
+For public API orchestration, `services/context_platform` is the current
+implementation path for the Context Platform:
 
-- Canonical Semantic Model: shared semantic types and relationships.
-- Capability Catalog: provider-neutral capabilities optimized for retrieval and
-  planner grounding.
-- Execution Catalog: resources, operations, contracts, variants, mappings, and
-  implementation metadata needed to call provider APIs.
-- Governance Context: proposals, lineage, evidence, review decisions, and
-  deprecation/merge decisions.
-- Catalog Versions: approved declarative catalog snapshots for audit, export,
-  dashboard read-only viewing, diff, and restore.
+- Source Catalog: `sources`, `source_documents`, `source_operations`,
+  `source_parameters`, and `source_fields`.
+- Canonical Model: LinkML-compatible classes, reusable slots, types, enums,
+  class-slot usages, and relations. PostgreSQL is the runtime registry; LinkML
+  YAML/JSON is the import/export format, not the storage engine.
+- Binding Layer: input/output bindings from source parameters and fields to
+  canonical slots or class-slot usages, including evidence, confidence, status,
+  and transforms.
+- Capability Catalog: planner-facing business capabilities, inputs, outputs,
+  and links to `source_operations`.
+- Planner Service: server-side planning, validation, and validated execution.
+- LLM MCP Adapter: optional high-level adapter exposing plan/execute/explain
+  tools to an LLM client.
 
-`apps/pubdata_mcp` is intentionally not the semantic layer. It is the MCP/tool
-runtime and deterministic contract interpreter.
+The core rule is that `source_operations` are the executable operations. Do not
+add a separate Operation Registry. Do not add a standalone Semantic Registry:
+slot descriptions, aliases, mappings, annotations, and validation constraints
+belong on canonical slots in the LinkML-compatible Canonical Model.
+
+`apps/pubdata_mcp` is intentionally not the Context Platform. It is an optional
+LLM MCP adapter and must not execute raw source operations directly.
 
 ```text
 Question
-  -> pubdata_mcp semantic_query
-  -> semantic_platform capability retrieval + planner
-  -> semantic execution graph
-  -> pubdata_mcp contract interpreter
-  -> provider APIs
-  -> structured semantic result
+  -> LLM MCP Adapter plan_request
+  -> Planner Service /planner/plan
+  -> validated plan
+  -> Planner Service /planner/execute
+  -> source_operations-based provider call
+  -> bindings-based canonical result
 ```
 
-The executor must not contain provider/domain choices such as "if this Korean
-word appears, choose this operation". Those choices belong in reviewed catalog
-data as capabilities, operation variants, contracts, and field mappings.
+Planner execution must not contain provider/domain choices such as "if this
+Korean word appears, choose this operation". Those choices belong in reviewed
+Capability Catalog and Binding Layer data.
 
-Approved catalog mutations create catalog versions. A version snapshot contains
-the declarative catalog only: semantic types, entities, capabilities, resources,
-operations, contracts, variants, field mappings, implementations, join rules,
-dependencies, and planning examples. Derived retrieval artifacts such as
-capability documents/vectors, endpoint checks, proposals, and source evidence
-remain outside the snapshot. Versions can be viewed read-only in the dashboard,
-exported as JSON, compared, or restored; restore creates a new active version
-instead of overwriting version history.
+LLM-generated or automatically generated artifacts are never approved
+automatically. Canonical classes, slots, types, enums, class-slot usages,
+bindings, capabilities, and capability-operation links follow:
+
+```text
+proposed -> reviewed -> approved -> published
+```
 
 ## Run
 

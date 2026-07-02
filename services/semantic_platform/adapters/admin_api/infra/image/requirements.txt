@@ -1,5 +1,0 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-psycopg[binary]>=3.2,<4.0
-python-multipart>=0.0.9,<0.1
-prefect==3.1.14

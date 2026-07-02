@@ -1,43 +1,88 @@
 tools:
-  - name: semantic_query
-    description: Plan a natural-language public-data question as a provider-neutral semantic execution DAG and optionally execute mapped provider tools.
-    handler: apps.pubdata_mcp.domain.catalog.semantic_query
+  - name: plan_request
+    description: Ask the server-side Planner Service to create and validate a canonical capability plan.
+    handler: apps.pubdata_mcp.domain.catalog.plan_request
     input:
       required:
         - query
       fields:
         query:
           type: string
-          description: Natural language question, such as 300억 이상 기업들의 조달 참여 규모.
+          description: Natural-language user request.
+        canonical_inputs:
+          type: object
+          description: Optional canonical input values already known by the LLM client.
+          default: {}
         limit:
           type: integer
-          description: Maximum semantic items and capability nodes to consider.
+          description: Maximum planner candidates to consider.
           default: 8
-        execute:
-          type: boolean
-          description: Execute DAG nodes when semantic arguments can be mapped to registered provider tools.
-          default: false
-        manual_plan:
-          type: object
-          description: Explicit execution-plan LLM response payload used only when LLM_MODE=codex_manual.
 
-  - name: semantic_smoke_test_operation
-    description: Execute one approved semantic operation contract or operation variant with sample semantic arguments and store the endpoint check result in semantic_platform.
-    handler: apps.pubdata_mcp.domain.catalog.semantic_smoke_test_operation
+  - name: execute_plan
+    description: Execute a validated Planner Service plan by plan id.
+    handler: apps.pubdata_mcp.domain.catalog.execute_plan
+    input:
+      required:
+        - plan_id
+      fields:
+        plan_id:
+          type: string
+          description: Planner Service plan id returned by plan_request.
+
+  - name: explain_plan
+    description: Return structured plan details suitable for LLM explanation.
+    handler: apps.pubdata_mcp.domain.catalog.explain_plan
     input:
       required: []
       fields:
-        operation_id:
+        plan_id:
           type: string
-          description: Approved operation_id from semantic_layer operation contracts. Optional when variant_id is provided.
-        variant_id:
-          type: string
-          description: Approved operation_variant id. Use this for capability-specific checks when one endpoint has multiple semantic capabilities or control values.
-        semantic_arguments:
+          description: Planner Service plan id.
+        plan:
           type: object
-          description: Semantic arguments used for the smoke test.
+          description: Inline plan payload to explain.
           default: {}
-        persist:
-          type: boolean
-          description: Store the check result in semantic_platform.
-          default: true
+
+  - name: search_capabilities
+    description: Developer/debug read tool for approved planner-facing capabilities.
+    handler: apps.pubdata_mcp.domain.catalog.search_capabilities
+    input:
+      required: []
+      fields:
+        query:
+          type: string
+          description: Optional capability search text.
+          default: ""
+        status:
+          type: string
+          description: Capability lifecycle status to read.
+          default: approved
+
+  - name: get_capability
+    description: Developer/debug read tool for one capability.
+    handler: apps.pubdata_mcp.domain.catalog.get_capability
+    input:
+      required:
+        - capability_id
+      fields:
+        capability_id:
+          type: string
+          description: Capability id.
+
+  - name: get_canonical_model
+    description: Developer/debug read tool for canonical entities and attributes.
+    handler: apps.pubdata_mcp.domain.catalog.get_canonical_model
+    input:
+      required: []
+      fields: {}
+
+  - name: get_operation_bindings
+    description: Developer/debug read tool for source operation bindings.
+    handler: apps.pubdata_mcp.domain.catalog.get_operation_bindings
+    input:
+      required:
+        - source_operation_id
+      fields:
+        source_operation_id:
+          type: string
+          description: Source operation id selected by Planner Service.

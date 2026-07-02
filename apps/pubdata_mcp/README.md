@@ -1,56 +1,52 @@
 # pubdata_mcp
 
-MCP-facing runtime for public-data semantic execution.
+Optional LLM MCP Adapter for the Context Platform.
 
-`pubdata_mcp` does not own the semantic layer catalog, proposal generation, canonical
-types, capability naming, or planning rules. It reads approved execution
-contracts from the `semantic_layer` service, currently implemented under
-`services/semantic_platform`, and executes the plan it receives.
-
-The current product direction is retrieval-first:
+`pubdata_mcp` does not own the Source Catalog, Canonical Model, Binding Layer,
+Capability Catalog, proposal generation, capability naming, planning rules, or
+provider-selection rules. It exposes high-level MCP tools that call the
+server-side Planner Service implemented under `services/context_platform`.
 
 ```text
-Question
-  -> semantic_layer capability retrieval
-  -> semantic_layer planner
-  -> execution graph
-  -> pubdata_mcp generic operation executor
+LLM client
+  -> pubdata_mcp plan_request
+  -> context-platform-planner-api /planner/plan
+  -> validated plan
+  -> pubdata_mcp execute_plan
+  -> context-platform-planner-api /planner/execute
+  -> canonical result
 ```
-
-`pubdata_mcp` does not search the vector index and does not decide which
-capability should be used. It receives a selected execution graph and runs it
-against approved execution contracts.
 
 ## Boundary
 
-```text
-MCP Client
-  -> pubdata_mcp semantic_query
-  -> semantic_layer planner/context APIs
-  -> pubdata_mcp generic operation executor
-  -> public API
-  -> normalized semantic result + evidence
-```
-
-`semantic_layer` owns:
+`context_platform` owns:
 
 - source ingestion
-- catalog/proposal review
-- catalog version snapshot/export/restore
-- canonical semantic types
-- capabilities and operation variants
-- operation contracts and field mappings
-- LLM-first execution planning
+- Source Catalog
+- Canonical Model
+- Binding Layer
+- Capability Catalog
+- proposal review and lifecycle
+- server-side planning
+- plan validation
+- validated plan execution
 
 `pubdata_mcp` owns:
 
 - MCP transport
-- loading approved execution contracts
-- compiling semantic arguments into raw API arguments
-- auth injection from environment variables
-- generic HTTP execution
-- response normalization using approved mappings
-- structured execution evidence
+- Planner Service client calls
+- high-level plan/execute/explain tools
+- developer/debug read tools for approved planner context
+- structured MCP responses
+
+`pubdata_mcp` must not:
+
+- execute raw source operations directly
+- expose `execute_operation`
+- infer provider/domain choices from Korean/provider terms
+- own canonical definitions or capability ranking
+- mutate catalog or proposal state
+- bypass Planner Service for execution
 
 ## Structure
 
@@ -61,148 +57,63 @@ apps/pubdata_mcp/
       main.py
       infra/
   domain/
-    catalog.py      # semantic_layer API client
-    execution.py    # generic execution runtime
-  specs/catalog.yaml    # semantic MCP tools only
+    catalog.py      # Planner Service / approved context API client
+    execution.py    # legacy compatibility code; do not expand raw execution
+  specs/catalog.yaml
   manifests/
 ```
 
-Provider-specific MCP tools and provider adapter modules were removed. Public
-API behavior should come from approved `operation_contract`,
-`operation_variant`, and `field_mapping` rows, not from hard-coded provider
-tools.
+## Target Tools
 
-## Tools
+Primary MCP tools:
 
-Current MCP tools:
+- `plan_request`
+- `execute_plan`
+- `explain_plan`
 
-- `semantic_query`
-- `semantic_smoke_test_operation`
+Developer/debug tools:
 
-`semantic_query` is the product entrypoint. `semantic_smoke_test_operation` is
-for validating an approved operation or variant.
+- `search_capabilities`
+- `get_capability`
+- `get_canonical_model`
+- `get_operation_bindings`
 
-## Runtime Data
+Forbidden tool:
 
-`pubdata_mcp` reads:
+- `execute_operation`
 
-```text
-GET /semantic/execution/contracts
-```
+## Planner APIs
 
-from `semantic-platform-planner-api`, not the admin API. Runtime planning uses:
+Runtime calls go to `context-platform-planner-api`:
 
 ```text
-POST /semantic/planner/execution-plan
+POST /planner/plan
+POST /planner/execute
+GET /planner/plans/{plan_id}
+POST /planner/validate
 ```
 
-The response must include:
-
-- resources
-- operation_contracts
-- operation_variants
-- operation_field_mappings
-- capability_implementations
-
-## Environment
-
-API keys stay in env files. The generic executor uses only auth metadata from
-the approved operation contract:
-
-```text
-operation_contract.auth.parameter
-operation_contract.auth.in
-operation_contract.auth.env_names
-```
-
-Provider-specific fallback env names must not be added to runtime code. If a
-source needs a different key name, declare it in the reviewed operation
-contract.
-
-## Contract Interpreter
-
-The executor interprets reviewed contracts; it does not infer provider rules.
-Provider-specific response shapes must be declared in
-`operation_contract.response`:
-
-```json
-{
-  "items_path": "response.body.items.item",
-  "count_path": "response.body.totalCount",
-  "success": {
-    "path": "response.header.resultCode",
-    "equals": "00",
-    "message_path": "response.header.resultMsg"
-  },
-  "error": {
-    "code_path": "response.header.resultCode",
-    "not_equals": "00",
-    "message_path": "response.header.resultMsg"
-  }
-}
-```
-
-Fields may use path expressions such as `data[].tax_type`, `[].cur_unit`, or
-`response.body.items.item[].untyCntrctNo`. The path evaluator is generic; the
-path values themselves come from approved catalog data.
-
-## Request Transform / Validation
-
-Planner output contains semantic values. It is allowed to produce
-`phone_number: "01022223333"` or `phone_number: "010-2222-3333"`. The final raw
-provider representation is decided by the selected operation contract.
-
-The executor supports declarative request rules:
-
-- `enum_mapping`
-- `strip` / `strip_chars`
-- `remove_whitespace`
-- `digits_only`
-- `uppercase` / `lowercase`
-- `date_format`
-- `phone_format`
-- `pattern`
-- `enum`
-- `min_length`
-- `max_length`
-
-Example:
-
-```json
-{
-  "request": {
-    "query": {
-      "phone": {
-        "semantic_type": "phone_number",
-        "transform": {
-          "name": "phone_format",
-          "style": "kr_mobile_hyphen"
-        },
-        "pattern": "^01[016789]-[0-9]{3,4}-[0-9]{4}$"
-      }
-    }
-  }
-}
-```
-
-The executor applies the transform, validates the result, and returns
-`validation_error` before any provider call if the declared rule fails. This
-keeps endpoint-specific formatting in reviewed catalog data instead of runtime
-provider code.
+`execute_plan` must send a plan id or validated plan payload to Planner Service.
+It must not compile source parameters or call provider APIs locally.
 
 ## Result Schema
 
-`semantic_query` returns structured MCP-friendly data. The stable top-level
-fields include:
+MCP responses should remain structured and planner-oriented. Stable fields:
 
 - `status`
-- `result_status`
-- `selected_capabilities`
-- `execution_graph`
+- `plan_id`
+- `selected_capability_id`
+- `selected_source_operation_id`
+- `canonical_inputs`
+- `parameter_bindings`
+- `expected_outputs`
+- `confidence`
+- `requires_confirmation`
+- `validation`
 - `results`
 - `errors`
 - `evidence`
 
-`result_status` is more specific than execution status and may include values
-such as `executed_with_items`, `executed_empty`, `provider_error`,
-`validation_error`, `not_executable`, or `capability_not_found`.
+Natural-language answer synthesis is a caller/UI concern. The adapter should
+return enough structured context for the LLM client to explain the plan and
+result.
